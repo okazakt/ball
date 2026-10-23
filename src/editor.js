@@ -1,4 +1,4 @@
-import { clone, floor, validateStage, wallKey } from './stage.js';
+import { COLS, ROWS, clone, floor, validateStage, wallKey } from './stage.js';
 const labels = {
   wall: '直線壁',
   corner: '曲面壁',
@@ -31,6 +31,8 @@ export class Editor {
     this.toast = toast;
     this.dialog = document.querySelector('#editor');
     this.canvas = document.querySelector('#grid');
+    this.canvas.width = COLS * 60;
+    this.canvas.height = ROWS * 60;
     this.ctx = this.canvas.getContext('2d');
     this.tool = 'wall';
     this.rotation = 0;
@@ -92,7 +94,7 @@ export class Editor {
         return;
       }
       this.snapshot();
-      this.stage.floors.push(floor(true));
+      this.stage.floors.push(floor());
       this.fi = this.stage.floors.length - 1;
       this.draw();
     };
@@ -150,10 +152,10 @@ export class Editor {
   }
   paint(e) {
     const r = this.canvas.getBoundingClientRect(),
-      gx = ((e.clientX - r.left) / r.width) * 6,
-      gz = ((e.clientY - r.top) / r.height) * 9,
-      x = Math.max(0, Math.min(5, Math.floor(gx))),
-      z = Math.max(0, Math.min(8, Math.floor(gz)));
+      gx = ((e.clientX - r.left) / r.width) * COLS,
+      gz = ((e.clientY - r.top) / r.height) * ROWS,
+      x = Math.max(0, Math.min(COLS - 1, Math.floor(gx))),
+      z = Math.max(0, Math.min(ROWS - 1, Math.floor(gz)));
     const f = this.stage.floors[this.fi],
       edge =
         Math.min(gx % 1, 1 - (gx % 1)) < Math.min(gz % 1, 1 - (gz % 1))
@@ -162,8 +164,8 @@ export class Editor {
     if (
       edge.x < 0 ||
       edge.z < 0 ||
-      edge.x > (edge.axis === 'h' ? 5 : 6) ||
-      edge.z > (edge.axis === 'h' ? 9 : 8)
+      edge.x > (edge.axis === 'h' ? COLS - 1 : COLS) ||
+      edge.z > (edge.axis === 'h' ? ROWS : ROWS - 1)
     )
       return;
     const edgeMode =
@@ -240,21 +242,21 @@ export class Editor {
   }
   draw() {
     const c = this.ctx;
-    c.clearRect(0, 0, 360, 540);
+    c.clearRect(0, 0, COLS * 60, ROWS * 60);
     c.fillStyle = this.stage.floors[this.fi].dark ? '#09121d' : '#163443';
-    c.fillRect(0, 0, 360, 540);
+    c.fillRect(0, 0, COLS * 60, ROWS * 60);
     c.strokeStyle = '#294552';
     c.lineWidth = 1;
-    for (let x = 0; x <= 6; x++) {
+    for (let x = 0; x <= COLS; x++) {
       c.beginPath();
       c.moveTo(x * 60, 0);
-      c.lineTo(x * 60, 540);
+      c.lineTo(x * 60, ROWS * 60);
       c.stroke();
     }
-    for (let z = 0; z <= 9; z++) {
+    for (let z = 0; z <= ROWS; z++) {
       c.beginPath();
       c.moveTo(0, z * 60);
-      c.lineTo(360, z * 60);
+      c.lineTo(COLS * 60, z * 60);
       c.stroke();
     }
     for (const t of this.stage.floors[this.fi].cells) {

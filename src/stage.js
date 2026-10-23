@@ -1,5 +1,5 @@
-export const COLS = 6,
-  ROWS = 9,
+export const COLS = 8,
+  ROWS = 11,
   GAP = 3;
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 export const wallKey = (axis, x, z) => `${axis}:${x}:${z}`;
@@ -11,8 +11,8 @@ export function floor(dark = false) {
 }
 export function defaultStage() {
   const a = floor(),
-    b = floor(true),
-    c = floor(true);
+    b = floor(),
+    c = floor();
   a.walls.push(
     ...[0, 1, 2, 4, 5].map((x) => ({ axis: 'h', x, z: 3 })),
     ...[1, 2, 3, 4].map((x) => ({ axis: 'h', x, z: 6 }))
@@ -22,17 +22,14 @@ export function defaultStage() {
     { x: 1, z: 4, type: 'sticky' },
     { x: 3, z: 3, type: 'door', rotation: 0 },
     { x: 2, z: 2, type: 'switch' },
-    { x: 4, z: 4, type: 'robot', rotation: 0, rule: 'right' },
   ];
   b.cells = [
     { x: 1, z: 7, type: 'hole' },
-    { x: 4, z: 5, type: 'slime', rotation: 2, rule: 'random' },
     { x: 2, z: 4, type: 'sticky' },
   ];
   b.walls.push(...[0, 1, 3, 4, 5].map((x) => ({ axis: 'h', x, z: 4 })));
   c.cells = [
     { x: 4, z: 7, type: 'goal' },
-    { x: 2, z: 4, type: 'spider', rotation: 0, rule: 'left' },
   ];
   return {
     version: 1,
@@ -42,8 +39,6 @@ export function defaultStage() {
     size: 'M',
     balls: [
       { x: 1, z: 1 },
-      { x: 2, z: 1 },
-      { x: 4, z: 1 },
     ],
     floors: [a, b, c],
   };
@@ -83,9 +78,9 @@ export function validateStage(s) {
   s.floors.forEach((f, i) => {
     if (
       !Array.isArray(f.walls) ||
-      f.walls.length > 123 ||
+      f.walls.length > COLS * (ROWS + 1) + (COLS + 1) * ROWS ||
       !Array.isArray(f.cells) ||
-      f.cells.length > 108 ||
+      f.cells.length > COLS * ROWS * 2 ||
       typeof f.dark !== 'boolean'
     )
       throw Error('フロア形式が正しくありません');
@@ -97,8 +92,8 @@ export function validateStage(s) {
         !Number.isInteger(w.z) ||
         w.x < 0 ||
         w.z < 0 ||
-        w.x > (w.axis === 'h' ? 5 : 6) ||
-        w.z > (w.axis === 'h' ? 9 : 8)
+        w.x > (w.axis === 'h' ? COLS - 1 : COLS) ||
+        w.z > (w.axis === 'h' ? ROWS : ROWS - 1)
       )
         throw Error('壁の位置が正しくありません');
       const k = wallKey(w.axis, w.x, w.z);

@@ -27,12 +27,15 @@ const game = new Game($('#viewport'), sound, {
     $('#video').disabled = true;
     $('#video').textContent = '録画を準備中…';
     $('#qr').hidden = true;
-    $('#status').textContent = '静かに、光の先へ。';
+    $('#status').textContent = '開始ボタンでスタート';
+    $('#start-panel').hidden = false;
   },
   frame(g) {
     if (g.state === 'playing')
       $('#status').textContent = g.balls.some((b) => b.sticky > 0)
         ? '磁力ネット！ シェイク連打で脱出'
+        : g.enemies.some((e) => e.state === 'chase')
+        ? '見つかった！ 追跡から逃げよう'
         : g.noise > 0.6
         ? '大きな音！ 敵が調べに来ます'
         : '静かに、光の先へ。';
@@ -61,6 +64,7 @@ const game = new Game($('#viewport'), sound, {
     showResult(result);
   },
   replaying() {
+    $('#start-panel').hidden = true;
     closeDialogs();
     $('#replay-label').hidden = false;
     $('#status').textContent = '玉の光だけで、直前の出来事を振り返る';
@@ -87,6 +91,22 @@ async function play(s, quest = false) {
   game.load(stage, quest);
   store.saveStage(stage).catch(() => toast('ステージの履歴を保存できませんでした'));
 }
+function startGame() {
+  sound.start().catch(() => {});
+  game.start();
+  $('#start-panel').hidden = true;
+  $('#sound').textContent = '音をOFFにする';
+}
+$('#start').onclick = startGame;
+$('#start-gyro').onclick = async () => {
+  try {
+    await game.enableGyro();
+    startGame();
+    toast('現在の角度を基準にしました');
+  } catch (e) {
+    toast(e.message + '。ドラッグ / キー操作でも開始できます');
+  }
+};
 const editor = new Editor((s) => play(s), toast);
 $('#menu').onclick = () => {
   game.keys.clear();

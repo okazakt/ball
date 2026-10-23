@@ -15,7 +15,10 @@ const assert = require('node:assert/strict');
     await page.goto(process.env.TEST_URL || 'http://localhost:8000');
     await page.waitForFunction(() => window.__toukan?.game.ready, {}, { timeout: 30000 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+    assert.equal(await page.evaluate(() => window.__toukan.game.state), 'ready');
     await page.waitForTimeout(700);
+    assert.equal(await page.evaluate(() => window.__toukan.game.elapsed), 0);
+    await page.click('#start');
     const start = await page.evaluate(() => window.__toukan.game.balls[0].body.translation().x);
     await page.keyboard.down('ArrowRight');
     await page.waitForTimeout(450);
@@ -24,17 +27,18 @@ const assert = require('node:assert/strict');
       (await page.evaluate(() => window.__toukan.game.balls[0].body.translation().x)) > start
     );
     await page.click('#retry');
+    await page.click('#start');
     // A real floor hole must allow the physical body to fall to B2.
     await page.evaluate(() => {
       const g = window.__toukan.game;
       g.enemies.forEach((e) => (e.stun = 100));
-      g.balls[0].body.setTranslation({ x: 1.5, y: 0.3, z: 3 }, true);
+      g.balls[0].body.setTranslation({ x: 0.5, y: 0.3, z: 2 }, true);
       g.balls[0].body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     });
     await page.waitForFunction(() => window.__toukan.game.balls[0].floor === 1);
     await page.evaluate(() => {
       const g = window.__toukan.game;
-      g.balls[0].body.setTranslation({ x: 4, y: -2.7, z: 0 }, true);
+      g.balls[0].body.setTranslation({ x: 5, y: -2.7, z: 0 }, true);
     });
     await page.waitForFunction(
       () => window.__toukan.game.outcome?.reason === '盤面の外に落ちました'
@@ -43,12 +47,13 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => window.__toukan.game.state === 'finished');
     assert.equal(await page.evaluate(() => window.__toukan.game.viewFloor), 1);
     await page.click('#again');
+    await page.click('#start');
     await page.evaluate(() => {
       const g = window.__toukan.game;
       g.enemies.forEach((e) => (e.stun = 100));
       for (const b of g.balls) {
         b.floor = 2;
-        b.body.setTranslation({ x: 1.5, y: -6 + b.radius + 0.01, z: 3 }, true);
+        b.body.setTranslation({ x: 0.5, y: -6 + b.radius + 0.01, z: 2 }, true);
         b.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       }
     });
@@ -62,6 +67,7 @@ const assert = require('node:assert/strict');
       1
     );
     await page.click('#again');
+    await page.click('#start');
     await page.click('#menu');
     await page.click('#qr-button');
     assert.equal(await page.locator('#qr canvas').count(), 1);
@@ -72,7 +78,7 @@ const assert = require('node:assert/strict');
       const ed = window.__toukan.editor,
         r = ed.canvas.getBoundingClientRect();
       ed.touched = new Set();
-      ed.paint({ clientX: r.left + (r.width * 1.5) / 6, clientY: r.top + (r.height * 1.5) / 9 });
+      ed.paint({ clientX: r.left + (r.width * 1.5) / 8, clientY: r.top + (r.height * 1.5) / 11 });
     });
     assert.match(await page.locator('#toast').textContent(), /共存できない/);
     await page.click('[data-tool="wall"]');

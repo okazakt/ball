@@ -61,3 +61,14 @@ test('storage rotates 50 recent stages while protecting favorites', async () => 
     false
   );
 });
+
+test('quest begins with one ball, no enemies, bright floors and expanded bounds', () => {
+  const s = defaultStage();
+  assert.equal(s.balls.length, 1);
+  assert.ok(s.floors.every((f) => !f.dark));
+  assert.ok(s.floors.every((f) => !f.cells.some((c) => ['robot', 'spider', 'slime'].includes(c.type))));
+  s.floors[2].cells.push({ x: 7, z: 10, type: 'goal' });
+  assert.doesNotThrow(() => validateStage(s));
+  s.floors[2].cells.push({ x: 8, z: 10, type: 'goal' });
+  assert.throws(() => validateStage(s));
+});

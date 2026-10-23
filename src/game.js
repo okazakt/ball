@@ -1,7 +1,7 @@
 import { COLS, ROWS, GAP } from './stage.js';
 const T = window.THREE,
   clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
-  cellPos = (x, z) => ({ x: x - 2.5, z: z - 4 });
+  cellPos = (x, z) => ({ x: x - (COLS - 1) / 2, z: z - (ROWS - 1) / 2 });
 export class Game {
   constructor(host, sound, events) {
     this.host = host;
@@ -83,7 +83,7 @@ export class Game {
       h = this.host.clientHeight;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
-    this.distance = Math.max(14, 8 / this.camera.aspect);
+    this.distance = Math.max(ROWS * 1.65, (COLS * 1.48) / this.camera.aspect);
     this.camera.updateProjectionMatrix();
   }
   material(color, glass = true) {
@@ -156,7 +156,7 @@ export class Game {
     this.target = { x: 0, z: 0 };
     this.tilt = { x: 0, z: 0 };
     this.jumpAt = -10;
-    this.state = 'playing';
+    this.state = 'ready';
     this.logStride =
       3 +
       stage.balls.length * 9 +
@@ -216,7 +216,7 @@ export class Game {
         );
       }
       if (fi === 0) {
-        const cover = this.box(0, y + 1.3, 0, 6.2, 0.07, 9.2, this.material(0x9cdeea), fi);
+        const cover = this.box(0, y + 1.3, 0, COLS + 0.2, 0.07, ROWS + 0.2, this.material(0x9cdeea), fi);
         cover.material.opacity = 0.055;
         cover.material.transmission = 0;
         cover.castShadow = false;
@@ -374,7 +374,7 @@ export class Game {
         body = this.world.createRigidBody(
           this.R.RigidBodyDesc.dynamic()
             .setTranslation(pos.x, radius + 0.1, pos.z)
-            .setLinearDamping(0.32)
+            .setLinearDamping(0.18)
             .setAngularDamping(0.12)
             .setCcdEnabled(true)
         );
@@ -427,8 +427,18 @@ export class Game {
         prevSpeed: 0,
       });
     });
-    this.startRecording();
+    this.sync();
     this.events.loaded?.();
+  }
+  start() {
+    if (this.state !== 'ready') return;
+    this.keys.clear();
+    this.pointers.clear();
+    this.acc = 0;
+    this.last = performance.now();
+    this.balls.forEach((b) => b.body.wakeUp());
+    this.state = 'playing';
+    this.startRecording();
   }
   batchFloor(group) {
     const buckets = new Map();
@@ -523,9 +533,9 @@ export class Game {
     const cone = add(
       new T.ShapeGeometry(shape),
       new T.MeshBasicMaterial({
-        color: 0xff664e,
+        color: 0xff2020,
         transparent: true,
-        opacity: 0.15,
+        opacity: 0.38,
         side: T.DoubleSide,
         depthWrite: false,
       }),
@@ -588,8 +598,8 @@ export class Game {
       const c = center(),
         dx = c.x - this.pointerCenter.x,
         dy = c.y - this.pointerCenter.y;
-      this.target.z = clamp(this.target.z + dx * 0.004, -0.32, 0.32);
-      this.target.x = clamp(this.target.x + dy * 0.004, -0.32, 0.32);
+      this.target.z = clamp(this.target.z + dx * 0.006, -0.32, 0.32);
+      this.target.x = clamp(this.target.x + dy * 0.006, -0.32, 0.32);
       if (Math.abs(dx) > 18) this.shake(0.45);
       this.pointerCenter = c;
     });
@@ -639,8 +649,8 @@ export class Game {
     this.orientationHandler ??= (e) => {
       if (!this.gyro || e.beta === null || e.gamma === null) return;
       this.gyroBase ??= { b: e.beta, g: e.gamma };
-      this.target.x = clamp((e.beta - this.gyroBase.b) * 0.012, -0.32, 0.32);
-      this.target.z = clamp((e.gamma - this.gyroBase.g) * 0.012, -0.32, 0.32);
+      this.target.x = clamp((e.beta - this.gyroBase.b) * 0.02, -0.32, 0.32);
+      this.target.z = clamp((e.gamma - this.gyroBase.g) * 0.02, -0.32, 0.32);
     };
     window.addEventListener('deviceorientation', this.orientationHandler);
     this.motionHandler ??= (e) => {
@@ -696,6 +706,7 @@ export class Game {
     for (const e of this.enemies)
       if (e.fi === fi && Math.hypot(e.x - p.x, e.z - p.z) < power * 2.5) {
         e.target = { x: p.x, z: p.z };
+        if (e.state === 'chase') continue;
         e.state = 'investigate';
         e.alert = 3;
         e.badge.material.color.set(0xffd66f);
@@ -713,12 +724,12 @@ export class Game {
     return this.doors.some((d) => d.fi === fi && !d.open && d.c.x === nx && d.c.z === nz);
   }
   clearSight(fi, a, b) {
-    let px = Math.floor(a.x + 3),
-      pz = Math.floor(a.z + 4.5);
+    let px = Math.floor(a.x + COLS / 2),
+      pz = Math.floor(a.z + ROWS / 2);
     const n = Math.ceil(Math.hypot(a.x - b.x, a.z - b.z) * 20);
     for (let j = 1; j <= n; j++) {
-      const x = Math.floor(a.x + ((b.x - a.x) * j) / n + 3),
-        z = Math.floor(a.z + ((b.z - a.z) * j) / n + 4.5);
+      const x = Math.floor(a.x + ((b.x - a.x) * j) / n + COLS / 2),
+        z = Math.floor(a.z + ((b.z - a.z) * j) / n + ROWS / 2);
       if ((x !== px || z !== pz) && this.blocked(fi, px, pz, x, z)) return false;
       px = x;
       pz = z;
@@ -778,10 +789,10 @@ export class Game {
         e.target = null;
       }
       if (!e.next || Math.hypot(e.next.x - e.x, e.next.z - e.z) < 0.04) {
-        const cx = clamp(Math.round(e.x + 2.5), 0, 5),
-          cz = clamp(Math.round(e.z + 4), 0, 8);
-        e.x = cx - 2.5;
-        e.z = cz - 4;
+        const cx = clamp(Math.round(e.x + (COLS - 1) / 2), 0, COLS - 1),
+          cz = clamp(Math.round(e.z + (ROWS - 1) / 2), 0, ROWS - 1);
+        e.x = cx - (COLS - 1) / 2;
+        e.z = cz - (ROWS - 1) / 2;
         let options = [0, 1, 2, 3].filter(
           (i) => !this.blocked(e.fi, cx, cz, cx + dirs[i][0], cz + dirs[i][1])
         );
@@ -837,9 +848,9 @@ export class Game {
     if (Math.hypot(old.x - this.tilt.x, old.z - this.tilt.z) / dt > 1.6)
       for (const e of this.enemies) e.stun = 1.4;
     this.world.gravity = {
-      x: Math.sin(this.tilt.z) * 9.81,
+      x: Math.sin(this.tilt.z) * 17,
       y: -Math.cos(this.tilt.x) * Math.cos(this.tilt.z) * 9.81,
-      z: Math.sin(this.tilt.x) * 9.81,
+      z: Math.sin(this.tilt.x) * 17,
     };
     for (const d of this.doors) {
       const switched = this.stage.floors[d.fi].cells.some(
@@ -860,6 +871,8 @@ export class Game {
       d.body.setNextKinematicTranslation({ x: d.mesh.position.x, y: ty, z: d.mesh.position.z });
       d.mesh.position.y = ty;
     }
+    if (Math.hypot(this.tilt.x, this.tilt.z) > 0.001)
+      for (const b of this.balls) if (!b.done) b.body.wakeUp();
     this.world.timestep = dt;
     this.world.step(this.queue);
     this.queue.drainCollisionEvents((h1, h2, started) => {
@@ -867,17 +880,17 @@ export class Game {
       for (const b of this.balls)
         if (!b.done && (b.collider.handle === h1 || b.collider.handle === h2)) {
           const p = b.body.translation();
-          this.makeNoise(p, b.floor, b.prevSpeed * b.body.mass() * 6);
+          const other = this.world.getCollider(b.collider.handle === h1 ? h2 : h1);
+          if (other && other.translation().y > -b.floor * GAP + 0.1)
+            this.makeNoise(p, b.floor, Math.max(0.3, b.prevSpeed * b.body.mass() * 6));
         }
     });
-    let maxSpeed = 0;
     for (const b of this.balls) {
       if (b.done) continue;
       const p = b.body.translation(),
         v = b.body.linvel();
       b.prevSpeed = Math.hypot(v.x, v.y, v.z);
-      maxSpeed = Math.max(maxSpeed, Math.hypot(v.x, v.z));
-      if (Math.abs(p.x) > 3.5 || Math.abs(p.z) > 5 || p.y < -this.stage.floors.length * GAP) {
+      if (Math.abs(p.x) > COLS / 2 + 0.5 || Math.abs(p.z) > ROWS / 2 + 0.5 || p.y < -this.stage.floors.length * GAP) {
         this.finish(false, '盤面の外に落ちました', b);
         return;
       }
@@ -933,7 +946,7 @@ export class Game {
     );
     this.viewFloor = this.activeFloor;
     this.noise = Math.max(0, this.noise - dt * 0.5);
-    this.sound.roll(maxSpeed);
+
     this.logAcc += dt;
     if (this.logAcc >= 1 / 30) {
       this.logAcc -= 1 / 30;
@@ -965,7 +978,7 @@ export class Game {
     this.ambient.layers.disableAll();
     this.sun.layers.disableAll();
     for (let i = 0; i < this.stage.floors.length; i++)
-      if (i === 0 || (!this.stage.floors[i].dark && i <= fi)) {
+      if (!this.stage.floors[i].dark) {
         this.ambient.layers.enable(i + 1);
         this.sun.layers.enable(i + 1);
       }

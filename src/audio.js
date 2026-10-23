@@ -28,24 +28,5 @@ export class Sound {
     o.start(t);
     o.stop(t + 0.16);
   }
-  roll(speed) {
-    if (!this.ctx || !this.enabled) return;
-    if (!this.rolling) {
-      const buffer = this.ctx.createBuffer(1, this.ctx.sampleRate, this.ctx.sampleRate),
-        d = buffer.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-      const n = this.ctx.createBufferSource(),
-        filter = this.ctx.createBiquadFilter();
-      this.rollGain = this.ctx.createGain();
-      n.buffer = buffer;
-      n.loop = true;
-      filter.type = 'lowpass';
-      filter.frequency.value = 220;
-      n.connect(filter).connect(this.rollGain).connect(this.ctx.destination);
-      this.rollGain.gain.value = 0;
-      n.start();
-      this.rolling = n;
-    }
-    this.rollGain.gain.setTargetAtTime(Math.min(speed * 0.008, 0.035), this.ctx.currentTime, 0.08);
-  }
+  roll() {}
 }
