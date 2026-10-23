@@ -1,5 +1,10 @@
 import { COLS, ROWS, GAP } from './stage.js';
 const T = window.THREE,
+  GRAVITY = 32,
+  TILT_GRAVITY = 51,
+  LID_Y = 1.335,
+  CASE_WIDTH = COLS + 0.2,
+  CASE_DEPTH = ROWS + 0.2,
   clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
   cellPos = (x, z) => ({ x: x - (COLS - 1) / 2, z: z - (ROWS - 1) / 2 });
 export class Game {
@@ -79,12 +84,33 @@ export class Game {
   }
   resize() {
     if (!this.renderer) return;
-    const w = this.host.clientWidth,
-      h = this.host.clientHeight;
+    const w = Math.max(1, this.host.clientWidth),
+      h = Math.max(1, this.host.clientHeight);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
-    this.distance = Math.max(ROWS * 1.65, (COLS * 1.48) / this.camera.aspect);
-    this.camera.updateProjectionMatrix();
+    this.distance = CASE_DEPTH / (2 * Math.tan(T.MathUtils.degToRad(this.camera.fov / 2)));
+    this.updateCamera();
+  }
+  updateCamera() {
+    const lidY = -(this.viewFloor || 0) * GAP + LID_Y;
+    const eyeX = Math.tan(this.tilt.z) * this.distance;
+    const eyeZ = Math.tan(this.tilt.x) * this.distance;
+    // Keep the optical axis perpendicular to the lid. The asymmetric frustum
+    // passes through its four corners, so only objects below it show parallax.
+    this.camera.up.set(0, 0, -1);
+    this.camera.position.set(eyeX, lidY + this.distance, eyeZ);
+    this.camera.lookAt(eyeX, lidY, eyeZ);
+    const scale = this.camera.near / this.distance;
+    this.camera.projectionMatrix.makePerspective(
+      (-CASE_WIDTH / 2 - eyeX) * scale,
+      (CASE_WIDTH / 2 - eyeX) * scale,
+      (CASE_DEPTH / 2 + eyeZ) * scale,
+      (-CASE_DEPTH / 2 + eyeZ) * scale,
+      this.camera.near,
+      this.camera.far
+    );
+    this.camera.projectionMatrixInverse.copy(this.camera.projectionMatrix).invert();
+    this.camera.updateMatrixWorld(true);
   }
   material(color, glass = true) {
     return new T.MeshPhysicalMaterial({
@@ -117,8 +143,8 @@ export class Game {
       this.world.createCollider(
         this.R.ColliderDesc.cuboid(w / 2, h / 2, d / 2)
           .setTranslation(x, y, z)
-          .setFriction(0.35)
-          .setRestitution(0.18)
+          .setFriction(0.1)
+          .setRestitution(h > 0.24 ? 0.7 : 0.1)
       );
     return m;
   }
@@ -138,7 +164,7 @@ export class Game {
       });
       this.board.remove(o);
     }
-    this.world = new this.R.World({ x: 0, y: -9.81, z: 0 });
+    this.world = new this.R.World({ x: 0, y: -GRAVITY, z: 0 });
     this.queue = new this.R.EventQueue(true);
     this.stage = stage;
     this.quest = quest;
@@ -173,7 +199,8 @@ export class Game {
     this.outcome = null;
     this.recordedBlob = null;
     this.viewFloor = 0;
-    this.camera.position.set(0, this.distance, this.distance * 0.28);
+    this.board.rotation.set(0, 0, 0);
+    this.updateCamera();
     stage.floors.forEach((f, fi) => {
       const y = -fi * GAP;
       const group = new T.Group();
@@ -204,19 +231,22 @@ export class Game {
         }
       for (const w of f.walls) {
         const p = cellPos(w.x, w.z);
+        const perimeter = w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
+        const height = perimeter ? 1.3 : 0.58;
         this.box(
           p.x + (w.axis === 'h' ? 0 : -0.5),
-          y + 0.29,
+          y + height / 2,
           p.z + (w.axis === 'h' ? -0.5 : 0),
           w.axis === 'h' ? 1.08 : 0.12,
-          0.58,
+          height,
           w.axis === 'h' ? 0.12 : 1.08,
           wall,
           fi
         );
       }
-      if (fi === 0) {
-        const cover = this.box(0, y + 1.3, 0, COLS + 0.2, 0.07, ROWS + 0.2, this.material(0x9cdeea), fi);
+      {
+        // Lower lids are visual only: balls must still fall through floor holes.
+        const cover = this.box(0, y + 1.3, 0, CASE_WIDTH, 0.07, CASE_DEPTH, this.material(0x9cdeea), fi, fi === 0);
         cover.material.opacity = 0.055;
         cover.material.transmission = 0;
         cover.castShadow = false;
@@ -329,7 +359,9 @@ export class Game {
           );
           const vertical = (c.rotation || 0) % 2 === 1;
           this.world.createCollider(
-            this.R.ColliderDesc.cuboid(vertical ? 0.065 : 0.5, 0.32, vertical ? 0.5 : 0.065),
+            this.R.ColliderDesc.cuboid(vertical ? 0.065 : 0.5, 0.32, vertical ? 0.5 : 0.065)
+              .setFriction(0.1)
+              .setRestitution(0.7),
             body
           );
           const mesh = this.box(
@@ -374,15 +406,16 @@ export class Game {
         body = this.world.createRigidBody(
           this.R.RigidBodyDesc.dynamic()
             .setTranslation(pos.x, radius + 0.1, pos.z)
-            .setLinearDamping(0.18)
-            .setAngularDamping(0.12)
+            .setLinearDamping(0.02)
+            .setAngularDamping(0.02)
             .setCcdEnabled(true)
         );
       const collider = this.world.createCollider(
         this.R.ColliderDesc.ball(radius)
           .setDensity({ S: 0.7, M: 1.4, L: 2 }[stage.size])
-          .setFriction(0.45)
-          .setRestitution(0.25)
+          .setFriction(0.1)
+          .setRestitution(0.7)
+          .setRestitutionCombineRule(this.R.CoefficientCombineRule.Min)
           .setActiveEvents(this.R.ActiveEvents.COLLISION_EVENTS),
         body
       );
@@ -675,7 +708,7 @@ export class Game {
       const p = b.body.translation(),
         ground = -b.floor * GAP;
       if (p.y < ground + b.radius + 0.14 && b.sticky <= 0)
-        b.body.applyImpulse({ x: 0, y: b.body.mass() * 3.5, z: 0 }, true);
+        b.body.applyImpulse({ x: 0, y: b.body.mass() * 6.3, z: 0 }, true);
     }
     for (const e of this.enemies) e.stun = 1.4;
     this.sound.tone(0.6);
@@ -843,14 +876,15 @@ export class Game {
       this.target.x =
         ((this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0)) * 0.3;
     } else if (!this.pointers.size && !this.gyro) this.target = { x: 0, z: 0 };
-    this.tilt.x += (this.target.x - this.tilt.x) * 0.12;
-    this.tilt.z += (this.target.z - this.tilt.z) * 0.12;
+    const response = 1 - Math.pow(1 - 0.35, dt * 60);
+    this.tilt.x += (this.target.x - this.tilt.x) * response;
+    this.tilt.z += (this.target.z - this.tilt.z) * response;
     if (Math.hypot(old.x - this.tilt.x, old.z - this.tilt.z) / dt > 1.6)
       for (const e of this.enemies) e.stun = 1.4;
     this.world.gravity = {
-      x: Math.sin(this.tilt.z) * 17,
-      y: -Math.cos(this.tilt.x) * Math.cos(this.tilt.z) * 9.81,
-      z: Math.sin(this.tilt.x) * 17,
+      x: Math.sin(this.tilt.z) * TILT_GRAVITY,
+      y: -Math.cos(this.tilt.x) * Math.cos(this.tilt.z) * GRAVITY,
+      z: Math.sin(this.tilt.x) * TILT_GRAVITY,
     };
     for (const d of this.doors) {
       const switched = this.stage.floors[d.fi].cells.some(
@@ -984,13 +1018,8 @@ export class Game {
       }
     this.sun.position.set(4 + this.tilt.z * 12, 12 - fi * GAP, 3 + this.tilt.x * 10);
     this.sunTarget.position.set(0, -fi * GAP, 0);
-    this.board.rotation.set(this.tilt.x, 0, -this.tilt.z);
-    const center = new T.Vector3(0, -fi * GAP, 0).applyEuler(this.board.rotation);
-    this.camera.position.lerp(
-      new T.Vector3(center.x, center.y + this.distance, center.z + this.distance * 0.28),
-      0.1
-    );
-    this.camera.lookAt(center);
+    this.board.rotation.set(0, 0, 0);
+    this.updateCamera();
   }
   loop(now) {
     requestAnimationFrame((t) => this.loop(t));

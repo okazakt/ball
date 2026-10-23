@@ -16,6 +16,75 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => window.__toukan?.game.ready, {}, { timeout: 30000 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.equal(await page.evaluate(() => window.__toukan.game.state), 'ready');
+    // Off-axis projection must pin the lid at every tilt, floor and viewport.
+    for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => {
+        const g = window.__toukan.game, T = window.THREE;
+        g.resize();
+        for (const floor of [0, 1, 2]) {
+          g.viewFloor = floor;
+          for (const [x, z] of [[0, 0], [0.3, -0.3], [-0.4, 0.4]]) {
+            g.tilt = { x, z };
+            g.setLighting();
+            if (g.board.rotation.x !== 0 || g.board.rotation.z !== 0)
+              throw Error('Board rotated');
+            for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+              const p = new T.Vector3(sx * 4.1, -floor * 3 + 1.335, sz * 5.6).project(g.camera);
+              if (Math.abs(p.x - sx) > 1e-6 || Math.abs(p.y + sz) > 1e-6)
+                throw Error('Lid corner moved');
+            }
+          }
+        }
+        g.viewFloor = 0;
+        g.tilt = { x: 0, z: 0 };
+        g.setLighting();
+        const origin = new T.Vector3(0, 0, 0).project(g.camera);
+        g.tilt = { x: 0.3, z: 0.3 };
+        g.setLighting();
+        const floor = new T.Vector3(0, 0, 0).project(g.camera);
+        const lower = new T.Vector3(0, -3, 0).project(g.camera);
+        if (!(floor.x > origin.x && floor.y < origin.y && lower.x > floor.x))
+          throw Error('Missing depth-dependent parallax');
+        g.tilt = { x: 0, z: 0 };
+        g.setLighting();
+      });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      const g = window.__toukan.game;
+      const original = g.stage;
+      const stage = structuredClone(original);
+      stage.floors = [{ dark: false, cells: [], walls: original.floors[0].walls.filter(
+        (w) => w.axis === 'h' ? w.z === 0 || w.z === 11 : w.x === 0 || w.x === 8
+      ) }];
+      stage.balls = [{ x: 4, z: 5 }];
+      g.load(stage, false);
+      const b = g.balls[0];
+      g.keys.add('ArrowRight');
+      for (let i = 0; i < 12; i++) g.step(1 / 60);
+      if (b.body.linvel().x < 1.5) throw Error('Sluggish tilt acceleration');
+      g.keys.clear();
+      g.keys.add('ArrowLeft');
+      for (let i = 0; i < 24; i++) g.step(1 / 60);
+      if (b.body.linvel().x > -1) throw Error('Sluggish direction reversal');
+      g.keys.clear();
+      g.tilt = g.target = { x: 0, z: 0 };
+      b.body.setTranslation({ x: 3, y: b.radius + 0.005, z: 0 }, true);
+      b.body.setLinvel({ x: 4, y: 0, z: 0 }, true);
+      b.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      let rebound = 0;
+      for (let i = 0; i < 40; i++) {
+        const incoming = b.body.linvel().x;
+        g.step(1 / 60);
+        if (b.body.linvel().x < 0) {
+          rebound = -b.body.linvel().x / incoming;
+          break;
+        }
+      }
+      if (rebound < 0.6 || rebound > 0.8) throw Error(`Unexpected wall restitution: ${rebound}`);
+      g.load(original);
+    });
     await page.waitForTimeout(700);
     assert.equal(await page.evaluate(() => window.__toukan.game.elapsed), 0);
     await page.click('#start');
@@ -101,7 +170,7 @@ const assert = require('node:assert/strict');
     await context.setOffline(false);
     assert.deepEqual(errors, []);
     console.log(
-      'PASS: rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
+      'PASS: pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
     );
   } finally {
     await browser.close();
