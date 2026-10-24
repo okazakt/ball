@@ -56,7 +56,8 @@ export class Game {
     this.sun = new T.DirectionalLight(0xffecd0, 3.0);
     this.sun.position.set(4, 12, 3);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.normalBias = 0.015;
     Object.assign(this.sun.shadow.camera, { left: -7, right: 7, top: 8, bottom: -8 });
     this.scene.add(this.sun);
     this.sunTarget = new T.Object3D();
@@ -211,7 +212,7 @@ export class Game {
         for (let i = 0; i < positions.count; i++)
           uvs.setXY(i, positions.getX(i) / COLS + 0.5, 0.5 - positions.getZ(i) / ROWS);
         const floorMat = new T.MeshStandardMaterial({
-          color: 0xffffff, map: spaceTexture(), roughness: 0.65, metalness: 0, envMapIntensity: 0.1,
+          color: 0xffffff, map: spaceTexture(), roughness: 1, metalness: 0, envMapIntensity: 0,
         });
         const floorMesh = this.mesh(floorGeo, floorMat, 0, y - 0.24, 0, fi);
         floorMesh.userData.surface = 'floor';
@@ -223,7 +224,7 @@ export class Game {
       });
       if (wallRects.length) {
         const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.012, fillet: 0.038 })), wall, 0, y, 0, fi);
-        walls.castShadow = true;
+        walls.castShadow = false;
         walls.userData.surface = 'walls';
       }
       const frameRects = f.walls.filter(perimeter).map(w => {
@@ -389,7 +390,7 @@ export class Game {
           smoothMoldedNormals(geometry);
           setRibFaces(geometry);
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
-          corner.castShadow = true;
+          corner.castShadow = false;
           corner.userData.surface = 'walls';
           const vertices = geometry.attributes.position.array;
           this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,

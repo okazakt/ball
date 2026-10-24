@@ -154,11 +154,11 @@ export function studioEnvironment(renderer) {
   panel(18, 12, 0, 1, 9, 0.025);
   panel(18, 12, -9, 1, 0, 0.035);
   panel(18, 12, 9, 1, 0, 0.035);
-  panel(8, 8, 0, 6, 0, 0.12);
-  panel(1.2, 11, -2.8, 5, 0, 12);
-  panel(1.2, 11, 2.8, 5, 0, 12);
-  panel(1.1, 7, -7, 1, 2, 8);
-  panel(1.1, 7, 7, 1, -2, 8);
+  panel(8, 8, 0, 6, 0, 0.025);
+  panel(0.28, 8, -2.8, 5, 0, 2.8);
+  panel(0.28, 8, 2.8, 5, 0, 2.8);
+  panel(0.35, 5, -7, 1, 2, 2);
+  panel(0.35, 5, 7, 1, -2, 2);
   const generator = new T.PMREMGenerator(renderer);
   const target = generator.fromScene(room, 0.02, 0.1, 40);
   generator.dispose();
@@ -196,25 +196,6 @@ export function spaceTexture() {
       ctx.fillStyle = glow;
       ctx.fillRect(x - 9, y - 9, 18, 18);
     }
-  }
-  // Printed insert: opaque, high-contrast lines are included in Three's
-  // transmission render target and visibly bend through the molded walls.
-  const step = 96;
-  for (let x = 0; x <= canvas.width; x += step / 4) {
-    ctx.strokeStyle = x % step === 0 ? '#81c9dd' : '#344c72';
-    ctx.lineWidth = x % step === 0 ? 2.5 : 1;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-  }
-  for (let y = 0; y <= canvas.height; y += step / 4) {
-    ctx.strokeStyle = y % step === 0 ? '#81c9dd' : '#344c72';
-    ctx.lineWidth = y % step === 0 ? 2.5 : 1;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-  }
-  ctx.strokeStyle = '#ffd286'; ctx.fillStyle = '#d0eaff';
-  ctx.font = '11px monospace'; ctx.lineWidth = 2;
-  for (let x = step; x < canvas.width; x += step) for (let y = step; y < canvas.height; y += step) {
-    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillText(`${x / step}:${y / step}`, x + 10, y - 9);
   }
   const texture = new T.CanvasTexture(canvas);
   texture.encoding = T.sRGBEncoding;
