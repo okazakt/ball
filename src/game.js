@@ -1,4 +1,4 @@
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -32,6 +32,8 @@ export class Game {
     this.wallSettings = { ...FIXED_WALL_SETTINGS };
     this.wallMaterials = new Set();
     this.wallColliders = [];
+    this.rippleGeometry=new T.RingGeometry(.12,.145,32);
+    this.rippleMaterial=new T.MeshBasicMaterial({color:0xffc17c,transparent:true,opacity:.7,depthTest:false,depthWrite:false,side:T.DoubleSide});
     this.setupInput();
   }
   updateWallSettings(patch) {
@@ -453,7 +455,7 @@ export class Game {
           );
           this.effects.push({ mesh, type: 'switch', f: fi, c });
         }
-        if (c.type === 'door') this.createSlidingDoor(c, fi);
+        if (c.type === 'door') this.createLiftDoor(c, fi);
         if (c.type === 'ramp') this.createRamp(c);
         if (c.type === 'corner') {
           const factory = () => curvedWallGeometry(c.rotation || 0, this.wallSettings);
@@ -538,7 +540,34 @@ export class Game {
     });
     this.updateWallSettings({});
     this.sync();
+    this.warmupRenderVariants();
     this.events.loaded?.();
+  }
+  warmupRenderVariants() {
+    // Moving a point light to the other floor changes Three.js shader variants.
+    // Draw every distribution, including the first lower ripple, before play.
+    const state=this.state, saved=this.balls.map(b=>({floor:b.displayFloor,done:b.displayDone,
+      meshMask:b.mesh.layers.mask,lightMask:b.light.layers.mask}));
+    this.state='playing';
+    const ripple=this.mesh(this.rippleGeometry,this.rippleMaterial,0,.025,0,0);
+    ripple.rotation.x=-Math.PI/2;
+    try {
+      for(let lower=0;lower<=this.balls.length;lower++) {
+        this.balls.forEach((b,i)=>{
+          const fi=i<lower?1:0;b.displayFloor=fi;b.displayDone=false;
+          b.mesh.layers.set(fi+1);b.light.layers.set(fi+1);
+        });
+        this.updateLowerRipples(1);
+        this.renderScene();
+      }
+    } finally {
+      ripple.parent.remove(ripple);
+      this.clearRipples();this.state=state;
+      this.balls.forEach((b,i)=>{b.displayFloor=saved[i].floor;b.displayDone=saved[i].done;
+        b.mesh.layers.mask=saved[i].meshMask;b.light.layers.mask=saved[i].lightMask;});
+      this.renderScene();
+    }
+    this.prewarmedPrograms=this.renderer.info.programs.length;
   }
   casePlastic() {
     return new T.MeshPhysicalMaterial({ color: 0x269c67, roughness: .1, metalness: 0,
@@ -602,25 +631,59 @@ export class Game {
     light.visible = !this.stage.floors[0].dark;
     this.board.add(light);
   }
-  createSlidingDoor(c, fi) {
-    const spec = doorSpec(c, fi), alongX = spec.dx !== 0;
-    const body = this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x, spec.y+.5, spec.z));
-    const collider = this.world.createCollider(this.R.ColliderDesc.cuboid(alongX ? .4 : .06, .46, alongX ? .06 : .4).setFriction(.1).setRestitution(.1), body);
-    const postCollider = this.world.createCollider(this.R.ColliderDesc.cylinder(spec.postHeight/2,.065)
-      .setTranslation(0,spec.postY-(spec.y+.5),0).setFriction(.1).setRestitution(.1), body);
-    const halfX = alongX ? .4 : .06, halfZ = alongX ? .06 : .4;
-    const geometry = solidGeometry([[-halfX*100,-halfZ*100,halfX*100,halfZ*100]], .92,
-      { bevel: .025, bevelOffset: -.025, fillet: .035 }).translate(0,-.46,0);
-    const mesh = this.mesh(geometry, this.casePlastic(), spec.x,spec.y+.5,spec.z,fi);
-    mesh.userData.dynamic = true; mesh.userData.surface = 'door'; mesh.castShadow = false;
-    const post = this.mesh(new T.CylinderGeometry(.065,.065,spec.postHeight,16),this.casePlastic(),spec.x,spec.postY,spec.z,1);
-    post.userData.dynamic = true; post.userData.surface = 'door-post'; post.castShadow = false;
-    this.doors.push({ c, fi, ...spec, body, collider, postCollider, mesh, post, slide: 0, nextSlide: 0, open: false });
+  createLiftDoor(c, fi) {
+    const spec=doorSpec(c,fi),pose=doorPose(spec,0);
+    const body=this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x,pose.panelY,spec.z));
+    const collider=this.world.createCollider(this.R.ColliderDesc.cuboid(spec.halfX,.46,spec.halfZ).setFriction(.1).setRestitution(0),body);
+    const geometry=solidGeometry([[-spec.halfX*100,-spec.halfZ*100,spec.halfX*100,spec.halfZ*100]],.92,
+      {bevel:.012,bevelOffset:-.012,fillet:.018}).translate(0,-.46,0);
+    const mesh=this.mesh(geometry,this.casePlastic(),spec.x,pose.panelY,spec.z,fi);
+    mesh.userData.dynamic=true;mesh.userData.surface='door';mesh.castShadow=false;
+    const postBody=this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x,pose.postY,spec.z));
+    const postCollider=this.world.createCollider(this.R.ColliderDesc.cylinder(pose.postHeight/2,.055).setFriction(.1).setRestitution(0),postBody);
+    const post=this.mesh(new T.CylinderGeometry(.055,.055,1,16),this.casePlastic(),spec.x,pose.postY,spec.z,1);
+    post.scale.y=pose.postHeight;post.userData.dynamic=true;post.userData.surface='door-post';post.castShadow=false;
+    this.doors.push({c,fi,...spec,body,collider,postBody,postCollider,mesh,post,slide:0,nextSlide:0,open:false});
   }
-  setDoorVisual(door, slide) {
-    door.slide = slide;
-    door.mesh.position.set(door.x+door.dx*slide, door.y+.5, door.z+door.dz*slide);
-    door.post.position.set(door.x+door.dx*slide,door.postY,door.z+door.dz*slide);
+  setDoorVisual(door, retraction) {
+    const pose=doorPose(door,retraction);door.slide=retraction;
+    door.mesh.position.set(door.x,pose.panelY,door.z);
+    door.post.position.set(door.x,pose.postY,door.z);door.post.scale.y=pose.postHeight;
+  }
+  releaseDoorBall(door,retraction) {
+    if(retraction>=door.slide)return true;
+    const next=doorPose(door,retraction),bottom=next.panelY-.46,top=next.panelY+.46;
+    for(const b of this.balls) {
+      if(b.done)continue;
+      const p=b.body.translation(),r=b.radius;
+      const normal=(p.x-door.x)*door.dx+(p.z-door.z)*door.dz;
+      const tangent=-(p.x-door.x)*door.dz+(p.z-door.z)*door.dx;
+      if(Math.abs(normal)>=door.halfThickness+r+.012 || Math.abs(tangent)>door.halfLength+r
+        || p.y+r<bottom || p.y-r>top+.015)continue;
+      const v=b.body.linvel();
+      const preferred=Math.abs(normal)>.001?Math.sign(normal):Math.sign(v.x*door.dx+v.z*door.dz)||-1;
+      let released=false;
+      for(const extra of [0,.12,.24,.4])for(const side of [preferred,-preferred]) {
+        if(released)break;
+        const distance=side*(door.halfThickness+r+.015+extra)-normal;
+        const target={x:p.x+door.dx*distance,y:p.y,z:p.z+door.dz*distance};
+        if(Math.abs(target.x)>COLS/2-r || Math.abs(target.z)>ROWS/2-r)continue;
+        let blocked=false;
+        this.world.intersectionsWithShape(target,b.body.rotation(),new this.R.Ball(r-.006),other=>{
+          if(![b.collider.handle,door.collider.handle,door.postCollider.handle].includes(other.handle))blocked=true;
+          return true;
+        });
+        if(blocked)continue;
+        b.body.setTranslation(target,true);
+        const outward=Math.max(.8,Math.abs(v.x*door.dx+v.z*door.dz));
+        const along=-v.x*door.dz+v.z*door.dx;
+        b.body.setLinvel({x:-door.dz*along+door.dx*side*outward,y:Math.min(v.y,0),z:door.dx*along+door.dz*side*outward},true);
+        released=true;
+      }
+      // If another object leaves neither side free, wait rather than crush.
+      if(!released)return false;
+    }
+    return true;
   }
   markCell(cell, y, fi, color, kind) {
     const p = cellPos(cell.x, cell.z);
@@ -921,7 +984,10 @@ export class Game {
     if (f.cells.some((c) => c.x === nx && c.z === nz && ['hole', 'corner', 'ramp'].includes(c.type)))
       return true;
     return this.stage.floors[0].cells.some(c => c.type === 'ramp' && footprint(c).some(p => p.x === nx && p.z === nz)) ||
-      this.doors.some(d => (d.fi === fi || d.fi === 0) && footprint(d.c).some(p => p.x === nx && p.z === nz));
+      this.doors.some(d => {
+        const edge=doorEdge(d.c);
+        return edge.axis===axis&&edge.x===wx&&edge.z===wz&&(fi===d.fi?!d.open:fi===1&&d.fi===0);
+      });
   }
   clearSight(fi, a, b) {
     let px = Math.floor(a.x + COLS / 2),
@@ -1070,6 +1136,7 @@ export class Game {
       d.open = switched || this.elapsed % 7 > 4;
       const target = d.open ? 1 : 0;
       d.nextSlide = d.slide + clamp(target-d.slide,-dt*1.8,dt*1.8);
+      if(!this.releaseDoorBall(d,d.nextSlide))d.nextSlide=d.slide;
     }
     if (Math.hypot(this.tilt.x, this.tilt.z) > 0.001)
       for (const b of this.balls) if (!b.done) b.body.wakeUp();
@@ -1078,7 +1145,10 @@ export class Game {
     for (let substep = 0; substep < 4; substep++) {
       for (const door of this.doors) {
         const slide = door.slide+(door.nextSlide-door.slide)*(substep+1)/4;
-        door.body.setNextKinematicTranslation({ x: door.x+door.dx*slide, y: door.y+.5, z: door.z+door.dz*slide });
+        const pose=doorPose(door,slide);
+        door.body.setNextKinematicTranslation({x:door.x,y:pose.panelY,z:door.z});
+        door.postCollider.setHalfHeight(pose.postHeight/2);
+        door.postBody.setNextKinematicTranslation({x:door.x,y:pose.postY,z:door.z});
       }
       this.world.step(this.queue);
       this.queue.drainCollisionEvents((h1, h2, started) => {
@@ -1247,9 +1317,7 @@ export class Game {
       b.rippleClock = (b.rippleClock ?? 0) - dt;
       if (b.rippleClock > 0) continue;
       b.rippleClock = .4;
-      const mesh = this.mesh(new T.RingGeometry(.12,.145,32),
-        new T.MeshBasicMaterial({color:0xffc17c,transparent:true,opacity:.7,
-          depthTest:false,depthWrite:false,side:T.DoubleSide}),
+      const mesh = this.mesh(this.rippleGeometry,this.rippleMaterial.clone(),
         b.mesh.position.x,.025,b.mesh.position.z,0);
       mesh.rotation.x = -Math.PI/2; mesh.renderOrder = 1000;
       mesh.userData.surface = 'lower-ball-ripple';
@@ -1258,7 +1326,7 @@ export class Game {
   }
   clearRipples() {
     for (const r of this.ripples) {
-      r.mesh.parent?.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose();
+      r.mesh.parent?.remove(r.mesh); r.mesh.material.dispose();
     }
     this.ripples = [];
     this.balls.forEach(b => { b.rippleClock = 0; });
@@ -1288,7 +1356,6 @@ export class Game {
     this.ripples = this.ripples.filter((r) => {
       if (r.age < 0.7) return true;
       this.board.remove(r.mesh);
-      r.mesh.geometry.dispose();
       r.mesh.material.dispose();
       return false;
     });

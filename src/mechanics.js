@@ -12,22 +12,27 @@ export function insideGoal(p, radius, cell, fi) {
 }
 export function footprint(c) {
   const [dx, dz] = direction(c);
-  return ['door', 'ramp'].includes(c.type) ? [{ x: c.x, z: c.z }, { x: c.x + dx, z: c.z + dz }] : [{ x: c.x, z: c.z }];
+  return c.type === 'ramp' ? [{ x: c.x, z: c.z }, { x: c.x + dx, z: c.z + dz }] : [{ x: c.x, z: c.z }];
 }
 export function sharedEdge(a, b) {
   return a.x === b.x ? { axis: 'h', x: a.x, z: Math.max(a.z, b.z) } : { axis: 'v', x: Math.max(a.x, b.x), z: a.z };
 }
+export function doorEdge(c) {
+  const [dx,dz] = direction(c);
+  return sharedEdge(c,{x:c.x+dx,z:c.z+dz});
+}
 export function doorSpec(c, fi) {
-  const [dx, dz] = direction(c), center = cellCenter(c.x, c.z), y = -fi * GAP;
-  // Fixed wall half-width (.088), door half-width (.06), and .02 clearance.
-  // Place the door along the left edge of its travel direction.
-  const offset = .5 - .088 - .06 - .02;
-  const p = { x: center.x + dz * offset, z: center.z - dx * offset };
-  const postBottom = fi === 0 ? -GAP + .08 : y - .18, postTop = y + .12;
-  return { dx, dz, x: p.x, z: p.z, y,
-    postHeight: postTop - postBottom, postY: (postTop + postBottom) / 2,
-    groove: [Math.min(p.x, p.x + dx) - (dx ? .1 : .08), Math.min(p.z, p.z + dz) - (dz ? .1 : .08),
-      Math.max(p.x, p.x + dx) + (dx ? .1 : .08), Math.max(p.z, p.z + dz) + (dz ? .1 : .08)] };
+  const [dx,dz] = direction(c), p = cellCenter(c.x,c.z), y = -fi*GAP;
+  const x=p.x+dx*.5,z=p.z+dz*.5,halfLength=.397,halfThickness=.07;
+  const halfX=dz ? halfLength : halfThickness,halfZ=dx ? halfLength : halfThickness;
+  return { dx,dz,x,z,y,halfLength,halfThickness,halfX,halfZ,
+    travel:.985,postBottom:y-GAP+.08,
+    groove:[x-halfX-.012,z-halfZ-.012,x+halfX+.012,z+halfZ+.012] };
+}
+export function doorPose(spec, retraction) {
+  const panelY=spec.y+.5-spec.travel*retraction;
+  const postTop=panelY-.46,postHeight=Math.max(.02,postTop-spec.postBottom);
+  return {panelY,postHeight,postY:spec.postBottom+postHeight/2};
 }
 export function subtractRectangle(rect, cut) {
   const [x0, z0, x1, z1] = rect;

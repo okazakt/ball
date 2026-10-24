@@ -1,4 +1,4 @@
-import { COLS, ROWS, GAP, footprint, sharedEdge, direction } from './mechanics.js';
+import { COLS, ROWS, GAP, footprint, sharedEdge, direction, doorEdge } from './mechanics.js';
 export { COLS, ROWS, GAP };
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 export const wallKey = (axis, x, z) => `${axis}:${x}:${z}`;
@@ -26,7 +26,7 @@ export function defaultStage() {
   a.cells = [
     { x: 4, z: 7, type: 'hole' },
     { x: 1, z: 4, type: 'sticky' },
-    { x: 3, z: 3, type: 'door', rotation: 1 },
+    { x: 3, z: 2, type: 'door', rotation: 0 },
     { x: 2, z: 2, type: 'switch' },
     { x: 0, z: 9, type: 'ramp', rotation: 2 },
     { x: 6, z: 9, type: 'goal' },
@@ -76,6 +76,7 @@ export function validateStage(s, { allowIncomplete = false } = {}) {
   if (!s.balls.every(p => cell(p) && [0, 1].includes(p.floor ?? 0)) || new Set(s.balls.map(p => `${p.floor ?? 0}:${p.x},${p.z}`)).size !== s.balls.length)
     throw Error('玉の位置が正しくありません');
   let goals = 0;
+  const doorEdges=new Set();
   const occupiedLayers = [new Map(), new Map()];
   s.floors.forEach((f, i) => {
     if (
@@ -111,6 +112,14 @@ export function validateStage(s, { allowIncomplete = false } = {}) {
         (c.rule !== undefined && !['left', 'right', 'random'].includes(c.rule))
       )
         throw Error('素材が正しくありません');
+      if(c.type === 'door') {
+        if(i !== 0) throw Error('昇降ドアは上段に配置してください');
+        const edge=doorEdge(c),key=wallKey(edge.axis,edge.x,edge.z);
+        if(doorEdges.has(key))throw Error('昇降ドアの辺が重複しています');
+        doorEdges.add(key);
+        if(s.floors.some(f=>f.walls.some(w=>wallKey(w.axis,w.x,w.z)===wallKey(edge.axis,edge.x,edge.z))))
+          throw Error('昇降ドアの位置に固定壁があります');
+      }
       if (c.type === 'ramp' && i !== 0) throw Error('坂道は上下を結ぶ上段素材として配置してください');
       const cells = footprint(c);
       if (!cells.every(cell)) throw Error('2マス素材が盤面からはみ出しています');

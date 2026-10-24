@@ -402,7 +402,6 @@ $('#storage-note').textContent = store.persistent
   : '一時保存モード：このブラウザでは永続保存が使えません。';
 try {
   await game.init();
-  $('#loading').remove();
   if (location.hash.startsWith('#stage=')) {
     try {
       stage = decodeStage(location.href);
@@ -411,6 +410,7 @@ try {
     }
   }
   await play(stage, !location.hash.startsWith('#stage='));
+  $('#loading').remove();
 } catch (e) {
   console.error(e);
   $('#loading').replaceChildren();

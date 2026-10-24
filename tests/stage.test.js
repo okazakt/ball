@@ -27,15 +27,17 @@ test('untrusted shared stages reject invalid coordinates, overlaps and bounds', 
   }
   assert.throws(() => decodeStage('x'.repeat(60001)));
 });
-test('two-cell doors reserve parking and lower post travel, and reject crossing walls', () => {
-  for (const layer of [0,1]) {
-    const s = defaultStage(); s.floors[layer].cells.push({ x:4,z:3,type:'sticky' });
-    assert.throws(() => validateStage(s), /可動域/);
-    const w = defaultStage(); w.floors[layer].walls.push({ axis:'v',x:4,z:3 });
-    assert.throws(() => validateStage(w), /途中/);
+test('one-cell lift doors reserve one upper/lower cell, require an open edge, and free the old parking cell',()=>{
+  for(const layer of [0,1]){
+    const s=defaultStage();s.floors[layer].cells.push({x:3,z:2,type:'sticky'});
+    assert.throws(()=>validateStage(s),/可動域/);
+    const w=defaultStage();w.floors[layer].walls.push({axis:'h',x:3,z:3});
+    assert.throws(()=>validateStage(w),/固定壁/);
   }
-  const s = defaultStage(); s.floors[0].cells.push({ x:7,z:5,type:'door',rotation:1 });
-  assert.throws(() => validateStage(s), /はみ出/);
+  const s=defaultStage();s.floors[0].cells.push({x:4,z:3,type:'sticky'});
+  assert.doesNotThrow(()=>validateStage(s));
+  const lower=defaultStage();lower.floors[1].cells.push({x:6,z:5,type:'door'});
+  assert.throws(()=>validateStage(lower),/上段/);
 });
 test('stage must contain a goal and unique ball starts', () => {
   const s = defaultStage();

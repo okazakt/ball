@@ -7,6 +7,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  for(const kind of ['hole','ramp','covered']){
   const r=await page.evaluate(async kind=>{
    const g=window.__toukan.game,T=window.THREE,{defaultStage,floor}=await import('./src/stage.js');
+   g.warmupRenderVariants=()=>{};
    const s={...defaultStage(),balls:[{x:1,z:1}],floors:[floor(),floor()]};
    s.floors[0].cells=[{type:'hole',x:4,z:5},{type:'ramp',x:1,z:7,rotation:2},{type:'goal',x:6,z:9}];
    g.load(s,false);const b=g.balls[0];

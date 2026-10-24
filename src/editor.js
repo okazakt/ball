@@ -1,4 +1,4 @@
-import { footprint } from './mechanics.js';
+import { footprint, doorSpec } from './mechanics.js';
 import { COLS, ROWS, clone, validateStage, wallKey } from './stage.js';
 const labels = {
   wall: '直線壁',
@@ -8,7 +8,7 @@ const labels = {
   hole: '穴',
   goal: 'ゴール',
   sticky: '粘着床',
-  door: '横ドア（2マス）',
+  door: '昇降ドア（1マス・選択辺）',
   ramp: '坂道（2マス）',
   switch: 'スイッチ',
   robot: 'ロボット',
@@ -89,6 +89,7 @@ export class Editor {
     document.querySelector('#redo').onclick = () => this.history('redo', 'undo');
     document.querySelector('#edit-floor').onchange = (e) => {
       this.fi = Number(e.target.value);
+      if(this.fi===1&&this.tool==='door')this.tool='wall';
       this.draw();
     };
     document.querySelector('#dark-floor').onclick = () => {
@@ -139,7 +140,7 @@ export class Editor {
   updateTools() {
     document
       .querySelectorAll('[data-tool]')
-      .forEach((b) => b.classList.toggle('selected', b.dataset.tool === this.tool));
+      .forEach((b) => { b.classList.toggle('selected', b.dataset.tool === this.tool); b.disabled=this.fi===1&&b.dataset.tool==='door'; });
     document.querySelector('#rotate').textContent = `↻ ${this.rotation * 90}°`;
   }
   paint(e) {
@@ -233,9 +234,11 @@ export class Editor {
       const height = (Math.max(...cells.map(c => c.z))-Math.min(...cells.map(c => c.z))+1)*60;
       c.fillStyle = t.lowerView && t.type === 'door' ? '#4b756b' : colors[t.type];
       c.fillRect(x+8,z+8,width-16,height-16);
+      if(t.type==='door'){const d=doorSpec(t,0);c.fillStyle='#16352b';
+        c.fillRect((d.x+COLS/2-d.halfX)*60,(d.z+ROWS/2-d.halfZ)*60,d.halfX*120,d.halfZ*120);}
       c.fillStyle = '#10232f'; c.font = '10px sans-serif'; c.textAlign = 'center';
-      c.fillText(t.lowerView && t.type === 'door' ? '支柱可動域' : t.type === 'door' ? '横ドア' : t.type === 'ramp' ? '坂道' : labels[t.type], x+width/2,z+height/2);
-      if (cells.length === 2 || t.rotation) c.fillText(['↓','→','↑','←'][t.rotation ?? 0],x+width/2,z+height/2+15);
+      c.fillText(t.lowerView && t.type === 'door' ? '昇降・支柱' : t.type === 'door' ? '昇降ドア' : t.type === 'ramp' ? '坂道' : labels[t.type], x+width/2,z+height/2);
+      if (cells.length === 2 || t.rotation || t.type === 'door') c.fillText(['↓','→','↑','←'][t.rotation ?? 0],x+width/2,z+height/2+15);
     }
     for (const b of this.stage.balls) if ((b.floor ?? 0) === this.fi) {
       c.fillStyle = '#176bff'; c.fillRect(b.x*60+1,b.z*60+1,58,58);

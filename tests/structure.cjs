@@ -13,6 +13,7 @@ const fs = require('node:fs');
   const {cellCenter,HOLE_RADIUS,doorSpec,GAP}=await import('./src/mechanics.js');
   const {FIXED_WALL_SETTINGS}=await import('./src/wall-settings.js');
   const g=window.__toukan.game,T=window.THREE,check=(ok,msg)=>{if(!ok)throw Error(msg)};
+  g.warmupRenderVariants=()=>{};
   check(JSON.stringify(g.wallSettings)===JSON.stringify(FIXED_WALL_SETTINGS),'Stored values overrode fixed tuning');
   check([...document.querySelectorAll('#wall-controls input')].every(i=>i.disabled),'Wall controls enabled');
   const before={...g.wallSettings};g.updateWallSettings({wallThickness:.5});check(JSON.stringify(before)===JSON.stringify(g.wallSettings),'Fixed values changed');
@@ -51,14 +52,14 @@ const fs = require('node:fs');
   const bounds=frames[0].geometry.boundingBox;
   check(Math.abs(bounds.min.y+frames[0].position.y+GAP+.24)<1e-5&&Math.abs(bounds.max.y+frames[0].position.y-1.07)<1e-5,'Shell does not span both floors');
   check(!g.floorGroups.some(f=>f.children.some(m=>m.userData.surface==='door-groove')),'Artificial black slot remains');
-  for(const d of g.doors)check(Math.abs(d.z-cellCenter(d.c.x,d.c.z).z+.332)<1e-6,'Initial door not beside upper wall');
+  for(const d of g.doors)check(d.c.x===3&&d.c.z===2&&Math.abs(d.z+2.5)<1e-6,'Initial door is not on the opening edge');
   return {roundHole:true,joinedRamps:4,contactGoals:4,fixedWalls:g.wallSettings,shells:frames.length};
  });
  console.log(JSON.stringify(result));assert.deepEqual(errors,[]);
- fs.mkdirSync('/workspace/ball-captures/v2.0.3',{recursive:true});
+ fs.mkdirSync('/workspace/ball-captures/v2.1.0',{recursive:true});
  for(const [name,tilt] of [['flat',{x:0,z:0}],['tilted',{x:-.48,z:.24}]]){
   await page.evaluate(tilt=>{const g=window.__toukan.game;g.tilt=tilt;g.renderScene()},tilt);
-  await page.screenshot({path:`/workspace/ball-captures/v2.0.3/${name}.png`});
+  await page.screenshot({path:`/workspace/ball-captures/v2.1.0/${name}.png`});
  }
  console.log('PASS structure, contacts and captures');
  }finally{await browser.close()}
