@@ -6,7 +6,8 @@ const fs = require('node:fs');
     executablePath: process.env.CHROMIUM_PATH,
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'] });
   try {
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 },
+      isMobile: true, hasTouch: true, serviceWorkers: 'block' });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
@@ -25,9 +26,26 @@ const fs = require('node:fs');
       g.loop(performance.now());
     });
     await page.locator('#wall-controls summary').click();
-    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 6);
+    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 11);
+    for (const [key, expected] of Object.entries({ clearcoat: 1, clearcoatRoughness: .05,
+      attenuationDistance: .5, specularIntensity: 1, metalness: .08 })) {
+      assert.equal(await page.locator(`#wall-${key}`).inputValue(), String(expected));
+    }
+    // Native vertical touch scrolling must reach the added controls on a phone.
+    const cdp = await page.context().newCDPSession(page);
+    const fieldsBox = await page.locator('.wall-fields').boundingBox();
+    const touchX = fieldsBox.x + fieldsBox.width - 4, touchY = fieldsBox.y + fieldsBox.height - 40;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: touchX, y: touchY }] });
+    for (let offset = 20; offset <= 160; offset += 20) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchX, y: touchY - offset }] });
+      await page.waitForTimeout(20);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => document.querySelector('.wall-fields').scrollTop > 0);
     for (const [key, min, max] of [['transmission', 0, 1], ['roughness', 0, .6],
-      ['ior', 1, 1.6], ['envMapIntensity', 0, 5], ['emissiveIntensity', 0, .5], ['topHighlight', 0, 3]]) {
+      ['ior', 1, 1.6], ['envMapIntensity', 0, 5], ['emissiveIntensity', 0, .5], ['topHighlight', 0, 3],
+      ['clearcoat', 0, 1], ['clearcoatRoughness', 0, .5], ['attenuationDistance', .01, 5],
+      ['specularIntensity', 0, 2], ['metalness', 0, .3]]) {
       for (const value of [min, max]) {
         await page.locator(`#wall-${key}`).evaluate((input, value) => {
           input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -50,6 +68,7 @@ const fs = require('node:fs');
     }
     // Real pointer drag and keyboard input must not tilt or jump the board.
     const before = await page.evaluate(() => ({ ...window.__toukan.game.target }));
+    await page.locator('#wall-transmission').scrollIntoViewIfNeeded();
     const slider = page.locator('#wall-transmission'), box = await slider.boundingBox();
     await page.mouse.move(box.x + 5, box.y + box.height / 2);
     await page.mouse.down();
@@ -62,9 +81,10 @@ const fs = require('node:fs');
       const g = window.__toukan.game, settings = { ...g.wallSettings };
       g.load(structuredClone(g.stage));
       for (const material of g.wallMaterials)
-        for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity'])
+        for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity',
+          'clearcoat', 'clearcoatRoughness', 'attenuationDistance', 'specularIntensity', 'metalness'])
           if (material[key] !== settings[key]) throw Error('Settings lost after reload');
-      for (const [key, value] of Object.entries({ transmission: 1, roughness: 0, ior: 1.25, envMapIntensity: 2, emissiveIntensity: .15, topHighlight: 2 })) {
+      for (const [key, value] of Object.entries({ transmission: 1, roughness: 0, ior: 1.25, envMapIntensity: 2, emissiveIntensity: .15, topHighlight: 2, clearcoat: 1, clearcoatRoughness: .05, attenuationDistance: .5, specularIntensity: 1, metalness: .08 })) {
         const input = document.querySelector('#wall-' + key);
         input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
       }
@@ -75,6 +95,6 @@ const fs = require('node:fs');
     await page.screenshot({ path: '/workspace/ball-captures/sliders/panel.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.deepEqual(errors, []);
-    console.log('PASS: all six sliders, endpoints, wall/door/corner updates, reload, pointer and keyboard isolation');
+    console.log('PASS: all eleven sliders, endpoints, wall/door/corner updates, reload, pointer and keyboard isolation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -129,11 +129,14 @@ export function ribGeometry(rectangles, height = 1) {
 export const WALL_DEFAULTS = Object.freeze({
   transmission: 1, roughness: 0, ior: 1.25, envMapIntensity: 2,
   emissiveIntensity: 0.15, topHighlight: 2,
+  clearcoat: 1, clearcoatRoughness: 0.05, attenuationDistance: 0.5,
+  specularIntensity: 1, metalness: 0.08,
 });
 
 export function applyWallSettings(material, settings) {
   const wasTransmitting = material.transmission > 0;
-  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity'])
+  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity',
+    'clearcoat', 'clearcoatRoughness', 'attenuationDistance', 'specularIntensity', 'metalness'])
     material[key] = settings[key];
   material.userData.topHighlight.value = settings.topHighlight;
   // Transmission at zero changes shader defines; compile correctly at both ends.
@@ -142,9 +145,11 @@ export function applyWallSettings(material, settings) {
 
 export function ribMaterials(settings = WALL_DEFAULTS) {
   const material = new T.MeshPhysicalMaterial({
-    thickness: 0.02, metalness: 0.1, transparent: false, opacity: 1,
+    thickness: 0.02, transparent: false, opacity: 1,
     color: 0xffffff, emissive: 0xffffff,
-    depthWrite: true, clearcoat: 1, clearcoatRoughness: 0.03,
+    // Pure white attenuation has no effect at any distance. A subtle blue tint
+    // lets the distance control absorption without changing alpha or roughness.
+    attenuationColor: 0xe8f4ff, depthWrite: true,
   });
   material.userData.topHighlight = { value: settings.topHighlight };
   // Change reflected light only on the curved roof; transmission stays intact.

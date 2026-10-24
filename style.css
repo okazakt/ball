@@ -5,6 +5,7 @@
 
 .version{display:block;color:var(--muted);font:10px ui-monospace,monospace;letter-spacing:.02em;margin-top:2px}
 
+#viewport{touch-action:auto}
 #wall-controls{position:absolute;top:44px;left:12px;z-index:6;max-width:calc(100% - 24px);width:268px;border:1px solid #45606b;border-radius:10px;background:#10232ff2;color:var(--ink);font-size:12px;touch-action:pan-y}
 #wall-controls:not([open]){width:auto}
 #wall-controls summary{padding:10px 12px;cursor:pointer;min-height:40px;box-sizing:border-box}

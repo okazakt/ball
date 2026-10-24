@@ -36,7 +36,7 @@ const assert = require('node:assert/strict');
       if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission !== 1 ||
           side.ior !== 1.25 || side.thickness !== 0.02 || side.roughness > 0.6 ||
           side.transparent || side.opacity !== 1 ||
-          side.envMapIntensity !== 2 || side.roughness !== 0 || side.metalness !== 0.1 ||
+          side.envMapIntensity !== 2 || side.roughness !== 0 || side.metalness !== 0.08 ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
         throw Error('Clear rib optics, top edge or height are incorrect');
       if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)

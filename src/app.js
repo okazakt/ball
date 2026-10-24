@@ -96,6 +96,11 @@ for (const [key, title, min, max] of [
   ['envMapIntensity', 'ツヤ / envMapIntensity', 0, 5],
   ['emissiveIntensity', '内部の明るさ / emissiveIntensity', 0, 0.5],
   ['topHighlight', '天面ハイライト強度', 0, 3],
+  ['clearcoat', 'コーティング強度 / clearcoat', 0, 1],
+  ['clearcoatRoughness', 'コートの粗さ / clearcoatRoughness', 0, 0.5],
+  ['attenuationDistance', '内部減衰 / attenuationDistance', 0.01, 5],
+  ['specularIntensity', '鏡面反射 / specularIntensity', 0, 2],
+  ['metalness', '金属感 / metalness', 0, 0.3],
 ]) {
   const label = document.createElement('label');
   label.htmlFor = `wall-${key}`;
