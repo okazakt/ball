@@ -1,4 +1,4 @@
-const CACHE = 'toukan-v7';
+const CACHE = 'toukan-v9-restored-clear-ribs';
 const ASSETS = [
   './',
   './index.html',
@@ -20,7 +20,7 @@ self.addEventListener('install', (e) =>
   e.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(ASSETS))
+      .then((c) => c.addAll(ASSETS.map((url) => new Request(url, { cache: 'reload' }))))
       .then(() => self.skipWaiting())
   )
 );
@@ -34,9 +34,11 @@ self.addEventListener('activate', (e) =>
         )
       )
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url))))
   )
 );
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
-  e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));
+  e.respondWith(caches.open(CACHE).then((cache) => cache.match(e.request)).then((hit) => hit || fetch(e.request)));
 });
