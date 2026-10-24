@@ -1,4 +1,4 @@
-const CACHE = 'toukan-v9-restored-clear-ribs';
+const CACHE = 'toukan-1.1.0+5595c4c77ee1';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS = [
   './vendor/three.min.js',
   './vendor/rapier.es.js',
   './src/app.js',
+  './src/version.js',
   './src/game.js',
   './src/case-visuals.js',
   './src/stage.js',

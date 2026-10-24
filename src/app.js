@@ -1,9 +1,12 @@
+import { VERSION } from './version.js';
 import { Game } from './game.js';
 import { Sound } from './audio.js';
 import { Editor } from './editor.js';
 import { defaultStage, decodeStage, stageURL } from './stage.js';
 import * as store from './storage.js';
 const $ = (s) => document.querySelector(s);
+$('#app-version').textContent = `v${VERSION}`;
+$('#menu-version').textContent = `表示中のバージョン：v${VERSION}`;
 let toastTimer,
   stage = defaultStage(),
   lastResult,
@@ -340,7 +343,15 @@ try {
 }
 if ('serviceWorker' in navigator)
   navigator.serviceWorker
-    .register('./sw.js')
+    .register('./sw.js', { updateViaCache: 'none' })
+    .then((registration) => {
+      const check = () => registration.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') check();
+      });
+      window.addEventListener('online', check);
+      return registration;
+    })
     .catch(() => toast('オフライン保存はHTTPSまたはlocalhostで利用できます'));
 // Read-only diagnostics for browser integration checks.
 window.__toukan = { game, editor, store };

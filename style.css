@@ -2,3 +2,5 @@
 #qr{background:white;padding:12px;border-radius:8px;overflow:auto}#qr img,#qr canvas{display:block;margin:auto;max-width:100%;height:auto}#qr[hidden]{display:none}
 
 #start-panel{position:absolute;inset:0;z-index:4;background:#07121b99;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px;text-align:center}#start-panel[hidden]{display:none}#start-panel small{color:#b1c9ce;font-size:11px}
+
+.version{display:block;color:var(--muted);font:10px ui-monospace,monospace;letter-spacing:.02em;margin-top:2px}
