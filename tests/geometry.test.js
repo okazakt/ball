@@ -46,6 +46,33 @@ test('straight walls retain valid faces at all 216 grid placements', () => {
   }
 });
 
+test('every end cap stays a full semicircle in both wall directions', async () => {
+  const { wallGeometry, curvedWallGeometry, WALL_DEFAULTS } = await import('../src/case-visuals.js');
+  const T = context.THREE;
+  for (const cornerRadius of [0, .5, 1]) {
+    const settings = { ...WALL_DEFAULTS, cornerRadius };
+    for (const vertical of [false, true]) {
+      const geometry = wallGeometry([[-3.8, -3.8, vertical ? 3.8 : 103.8, vertical ? 103.8 : 3.8]], settings);
+      const material = new T.MeshBasicMaterial(), mesh = new T.Mesh(geometry, material);
+      for (const endpoint of [0, 1]) for (let angle = -1.45; angle <= 1.46; angle += .145) {
+        const sign = endpoint ? 1 : -1;
+        const at = radius => {
+          const along = endpoint + sign * radius * Math.cos(angle), across = radius * Math.sin(angle);
+          return new T.Vector3(vertical ? across : along, 2, vertical ? along : across);
+        };
+        const ray = point => new T.Raycaster(point, new T.Vector3(0, -1, 0)).intersectObject(mesh);
+        assert.ok(ray(at(.037)).length, 'semicircle interior missing');
+        assert.equal(ray(at(.039)).length, 0, 'square cap extends beyond the semicircle');
+      }
+      geometry.dispose(); material.dispose();
+    }
+    for (const rotation of [0, 1, 2, 3]) {
+      const geometry = curvedWallGeometry(rotation, settings);
+      checkBody(geometry); geometry.dispose();
+    }
+  }
+});
+
 test('L/T/cross junctions, closed loops and separate walls have no gaps or duplicate top faces', () => {
   const fixtures = [
     { name: 'L', rects: [[0, 0, 100, 10], [0, 0, 10, 100]], area: 0.19 },
@@ -90,7 +117,7 @@ test('rounded transparent walls remain valid at every grid placement', async () 
   assert.equal(material.depthWrite, false);
   assert.equal(material.transparent, true);
   assert.equal(material.userData.wallUniforms.centerOpacity.value, .04);
-  assert.equal(Object.keys(material.userData.wallUniforms).length, 7);
+  assert.equal(Object.keys(material.userData.wallUniforms).length, 10);
   material.dispose();
 });
 

@@ -48,6 +48,7 @@ export class Game {
       mesh.geometry.dispose(); mesh.material.alphaMap.dispose();
       mesh.geometry = geometry; mesh.material.alphaMap = texture;
       mesh.material.userData.wallDistance.value = texture;
+      mesh.material.userData.wallTexel.value.set(1 / texture.image.width, 1 / texture.image.height);
     });
   }
   async init() {

@@ -97,6 +97,9 @@ for (const [key, title, min, max] of [
   ['centerOpacity', '中央の不透明度 / centerOpacity', 0, 0.5],
   ['taperAngle', '抜き勾配 / taperAngle', 0, 0.8],
   ['cornerRadius', '先端・角の丸み / cornerRadius', 0, 1],
+  ['lightAngle', '光源の角度 / lightAngle', 0, 3.14],
+  ['specularSharpness', '光の鋭さ / specularSharpness', 1, 20],
+  ['resinTint', '樹脂の色味・ミルク感 / resinTint', 0, 1],
 ]) {
   const label = document.createElement('label');
   label.htmlFor = `wall-${key}`;

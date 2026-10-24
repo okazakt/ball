@@ -33,6 +33,7 @@ const fs = require('node:fs');
     });
     await page.evaluate(() => {
       const g = window.__toukan.game, stage = structuredClone(g.stage);
+      stage.floors[0].walls.push({ axis: 'v', x: 6, z: 8 });
       stage.floors[0].cells.push({ type: 'door', x: 2, z: 2 },
         ...[0, 1, 2, 3].map((rotation, x) => ({ type: 'corner', x, z: 4, rotation })));
       g.load(stage); g.state = 'playing';
@@ -44,10 +45,10 @@ const fs = require('node:fs');
           window.wallUnchanged.push([m, m.geometry.uuid, m.material.uuid, m.material.color.getHex()]);
     });
     await page.locator('#wall-controls summary').click();
-    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 7);
+    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 10);
     assert.equal(await page.locator('#wall-centerOpacity').inputValue(), '0.04');
     for (const [key, min, max] of [['edgeWidth', .05, .5], ['edgeBrightness', 0, 5],
-      ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1]]) {
+      ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1], ['lightAngle', 0, 3.14], ['specularSharpness', 1, 20], ['resinTint', 0, 1]]) {
       for (const value of [min, max]) {
         const oldGeometry = key === 'cornerRadius' ? await page.evaluate(() => [...window.__toukan.game.wallMaterials].length && window.__toukan.game.floorGroups[0].children.find(m => m.userData.surface === 'walls').geometry.uuid) : null;
         await page.locator(`#wall-${key}`).evaluate((input, value) => {
@@ -76,7 +77,7 @@ const fs = require('node:fs');
     const bands = await page.evaluate(() => {
       const g = window.__toukan.game;
       g.tilt = { x: 0, z: 0 }; g.setLighting();
-      g.updateWallSettings({ sideGloss: 0, bottomEdge: 0, centerOpacity: 0, edgeBrightness: 3 });
+      g.updateWallSettings({ sideGloss: 0, bottomEdge: 0, centerOpacity: 0, edgeBrightness: 3, resinTint: 0, lightAngle: .78, specularSharpness: 8 });
       const copy = document.createElement('canvas');
       copy.width = g.renderer.domElement.width; copy.height = g.renderer.domElement.height;
       const ctx = copy.getContext('2d', { willReadFrequently: true }), result = [];
@@ -95,6 +96,33 @@ const fs = require('node:fs');
     console.log('Rendered white-band pixels:', JSON.stringify(bands));
     assert.ok(bands[1].bright > bands[0].bright + 10, 'White bands must grow at 0.25');
     assert.ok(bands[2].bright > bands[1].bright + 10, 'White bands must grow at 0.50');
+    const direction = await page.evaluate(() => {
+      const g = window.__toukan.game, T = window.THREE, ratio = g.renderer.getPixelRatio();
+      g.renderer.setPixelRatio(3);
+      g.updateWallSettings({ edgeWidth: .25, edgeBrightness: 3, specularSharpness: 8,
+        sideGloss: 0, bottomEdge: 0, centerOpacity: 0, resinTint: 0, taperAngle: 0 });
+      const copy = document.createElement('canvas');
+      copy.width = g.renderer.domElement.width; copy.height = g.renderer.domElement.height;
+      const ctx = copy.getContext('2d', { willReadFrequently: true });
+      const samples = [];
+      for (const lightAngle of [0, 3.14]) {
+        g.updateWallSettings({ lightAngle });
+        g.renderer.clear(); g.renderer.render(g.scene, g.camera);
+        ctx.drawImage(g.renderer.domElement, 0, 0);
+        samples.push([-1, 1].map(sign => {
+          const point = new T.Vector3(2 + sign * .025, 1, 3).project(g.camera);
+          const x = Math.round((point.x + 1) / 2 * copy.width), y = Math.round((1 - point.y) / 2 * copy.height);
+          const data = ctx.getImageData(x - 1, y - 1, 3, 3).data;
+          let sum = 0; for (let i = 0; i < data.length; i += 4) sum += data[i];
+          return sum / 9;
+        }));
+      }
+      g.renderer.setPixelRatio(ratio);
+      return samples;
+    });
+    console.log('Opposite rail brightness at light angles 0 / 3.14:', JSON.stringify(direction));
+    assert.ok(direction[0][0] > direction[1][0] + 25, 'Left rail must brighten toward the light');
+    assert.ok(direction[1][1] > direction[0][1] + 25, 'Right rail must brighten when the light rotates');
     const slider = page.locator('#wall-edgeWidth');
     await slider.scrollIntoViewIfNeeded();
     const before = await page.evaluate(() => ({ ...window.__toukan.game.target }));
@@ -111,7 +139,7 @@ const fs = require('node:fs');
       g.load(structuredClone(g.stage));
       for (const m of g.wallMaterials) for (const key of Object.keys(settings))
         if (m.userData.wallUniforms[key].value !== settings[key]) throw Error('Settings lost on reload');
-      g.updateWallSettings({ edgeBrightness: 0, sideGloss: 0, bottomEdge: 0, centerOpacity: 0 });
+      g.updateWallSettings({ edgeBrightness: 0, sideGloss: 0, bottomEdge: 0, centerOpacity: 0, resinTint: 0 });
       g.setLighting(); g.camera.updateMatrixWorld(true);
       const render = () => { g.renderer.clear(); g.renderer.render(g.scene, g.camera); return g.renderer.domElement.toDataURL(); };
       const clear = render(), wallMeshes = [];
@@ -120,7 +148,7 @@ const fs = require('node:fs');
       });
       if (render() !== clear) throw Error('Clear wall changes the background');
       wallMeshes.forEach(m => m.visible = true);
-      const defaults = { edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35, centerOpacity: .04, taperAngle: .35, cornerRadius: .5 };
+      const defaults = { edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35, centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2 };
       for (const [key, value] of Object.entries(defaults)) {
         const input = document.querySelector('#wall-' + key); input.value = value;
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -136,6 +164,6 @@ const fs = require('node:fs');
     await page.screenshot({ path: '/workspace/ball-captures/clear-molded/tilted.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.deepEqual(errors, []);
-    console.log('PASS: seven sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
+    console.log('PASS: ten sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
