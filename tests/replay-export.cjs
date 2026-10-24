@@ -17,7 +17,7 @@ const assert=require('node:assert/strict');
   const b=g.balls[0];b.body.setTranslation({x:0,y:-1.24+b.radius,z:0},true);b.floor=1;g.sync();g.setLighting();g.updateLowerRipples(.5);
   check(g.ripples.length===1,'Lower ball has no position indicator');
   const ring=g.ripples[0].mesh;check(!ring.material.depthTest&&ring.layers.isEnabled(1),'Lower ripple hidden by floor');
-  check(!b.mesh.material.visible&&b.mesh.visible,'Lower body visible or its light disabled');
+  check(b.mesh.material.visible&&b.mesh.visible,'Lower ball must be drawn and naturally occluded by the floor');
   check(!g.ambient.layers.isEnabled(2)&&!g.sun.layers.isEnabled(2)&&g.lowerAmbient.intensity<.05,'Sunlight reaches the closed lower chamber');
   g.load(defaultStage(),false);g.start();
   for(let i=0;i<40;i++)g.step(1/60);g.sync();g.finish(true,'test');

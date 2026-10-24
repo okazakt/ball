@@ -378,7 +378,8 @@ export class Game {
           )
             bottom++;
           const depth = (bottom - fi) * GAP;
-          const beam = new T.SpotLight(0xbceeff, .35, depth + 1, .35, 1, 2);
+          // Soft local daylight through the opening, rather than lower-room sun.
+          const beam = new T.SpotLight(0xbceeff, 1.2, depth + 2, .6, .7, 1);
           beam.position.set(p.x, y + 0.5, p.z);
           beam.target.position.set(p.x, y - depth, p.z);
           beam.layers.disableAll();
@@ -594,6 +595,12 @@ export class Game {
     if (!desc) throw Error('坂道の立体形状を生成できません');
     const collider = this.world.createCollider(desc.setFriction(.15).setRestitution(0));
     this.ramps.push({ c, mesh, collider });
+    // The open ramp also admits light into the lower chamber near its entrance.
+    const p = cellPos(c.x,c.z);
+    const light = new T.PointLight(0xc3e9ff,.85,2.6,1.5);
+    light.position.set(p.x+dx*.5,.45,p.z+dz*.5); light.layers.set(2);
+    light.visible = !this.stage.floors[0].dark;
+    this.board.add(light);
   }
   createSlidingDoor(c, fi) {
     const spec = doorSpec(c, fi), alongX = spec.dx !== 0;
@@ -1175,7 +1182,8 @@ export class Game {
     const fi = this.viewFloor;
     for (const b of this.balls) {
       b.mesh.visible = !(b.displayDone ?? b.done);
-      b.mesh.material.visible = (b.displayFloor ?? b.floor) === 0;
+      // Opaque floors occlude the ball naturally; openings reveal it on either floor.
+      b.mesh.material.visible = true;
     }
     this.floorGroups.forEach((g, i) => (g.visible = i >= fi));
     this.ambient.layers.disableAll();
