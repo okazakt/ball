@@ -104,32 +104,39 @@ export function ribGeometry(rectangles, height = 1) {
 }
 
 export function ribMaterials() {
-  // Alpha blending keeps the floor visible without an extra screen-space
-  // transmission pass for each floor or refracting other walls into the rib.
-  return new T.MeshStandardMaterial({
-    color: 0xddeef3, transparent: true, opacity: 0.18,
-    roughness: 0.22, metalness: 0.05, envMapIntensity: 0.65,
-    depthWrite: false,
+  const side = new T.MeshPhysicalMaterial({
+    color: 0xffffff, transmission: 0.95, ior: 1.5,
+    thickness: 0.10, roughness: 0.02, metalness: 0,
+    opacity: 1, transparent: true, depthWrite: false,
+    clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.5,
   });
+  const top = new T.MeshPhysicalMaterial({
+    color: 0xffffff, transmission: 0.15, ior: 1.5,
+    thickness: 0.10, roughness: 0.05, metalness: 0,
+    opacity: 0.65, transparent: true, depthWrite: false,
+    clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.5,
+  });
+  return [side, top];
 }
 
 export function setRibFaces(geometry) {
+  // Shade the whole upper cross-section and its rounded shoulder as one rib.
+  // Vertical faces and the bottom stay clear; no outline geometry is added.
+  const normal = geometry.attributes.normal;
+  const count = geometry.index?.count ?? geometry.attributes.position.count;
+  const vertex = i => geometry.index ? geometry.index.getX(i) : i;
+  const faces = [[], []];
+  for (let i = 0; i < count; i += 3) {
+    const next = (normal.getY(vertex(i)) + normal.getY(vertex(i + 1)) +
+      normal.getY(vertex(i + 2))) / 3 > 0.05 ? 1 : 0;
+    faces[next].push(vertex(i), vertex(i + 1), vertex(i + 2));
+  }
+  // Two contiguous draw ranges avoid a draw call for each bevel triangle.
+  geometry.setIndex(faces[0].concat(faces[1]));
   geometry.clearGroups();
-  geometry.addGroup(0, geometry.attributes.position.count, 0);
+  geometry.addGroup(0, faces[0].length, 0);
+  geometry.addGroup(faces[0].length, faces[1].length, 1);
   return geometry;
-}
-
-export function ribEdgeMaterial() {
-  return new T.LineBasicMaterial({
-    color: 0xe6f5f5, transparent: true, opacity: 0.65,
-    depthWrite: false,
-  });
-}
-
-export function ribEdgeGeometry(body) {
-  // Feature edges come directly from the finished body. No second contour,
-  // tube sweep, corner tangent or independent height calculation is needed.
-  return new T.EdgesGeometry(body, 30);
 }
 
 export function studioEnvironment(renderer) {

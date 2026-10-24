@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const context = {};
 vm.runInNewContext(readFileSync(new URL('../vendor/three.min.js', import.meta.url), 'utf8'), context);
 globalThis.window = { THREE: context.THREE };
-const { ribGeometry, ribEdgeGeometry } = await import('../src/case-visuals.js');
+const { ribGeometry } = await import('../src/case-visuals.js');
 
 function checkBody(geometry) {
   const p = geometry.attributes.position, n = geometry.attributes.normal;
@@ -20,9 +20,7 @@ function checkBody(geometry) {
   geometry.computeBoundingBox();
   assert.ok(Math.abs(geometry.boundingBox.min.y) < 1e-6);
   assert.ok(Math.abs(geometry.boundingBox.max.y - 1) < 1e-6);
-  const edges = ribEdgeGeometry(geometry);
-  assert.ok([...edges.attributes.position.array].every(Number.isFinite));
-  edges.dispose();
+
 }
 
 function topArea(geometry) {
@@ -42,7 +40,7 @@ test('straight walls retain valid faces at all 216 grid placements', () => {
       checkBody(geometry);
       assert.ok(Math.abs(topArea(geometry) - 1.076 * 0.076) < 1e-6);
       assert.equal(geometry.attributes.position.count, 36);
-      assert.equal(ribEdgeGeometry(geometry).attributes.position.count, 24);
+
       geometry.dispose();
     }
   }
@@ -72,4 +70,25 @@ test('L/T/cross junctions, closed loops and separate walls have no gaps or dupli
     }
     geometry.dispose(); mesh.material.dispose();
   }
+});
+
+
+test('rounded plastic ribs remain valid at every grid placement', async () => {
+  const { solidGeometry, setRibFaces, ribMaterials } = await import('../src/case-visuals.js');
+  for (let x = -400; x <= 400; x += 100) for (let z = -550; z <= 550; z += 100)
+    for (const vertical of [false, true]) {
+      const geometry = setRibFaces(solidGeometry([[x - 3.8, z - 3.8,
+        x + (vertical ? 3.8 : 103.8), z + (vertical ? 103.8 : 3.8)]], 1,
+        { bevel: .012, fillet: .038 }));
+      checkBody(geometry);
+      assert.equal(geometry.groups.length, 2);
+      assert.ok(geometry.groups.every(group => group.count > 0));
+      geometry.dispose();
+    }
+  const [side, top] = ribMaterials();
+  assert.equal(top.opacity, .65);
+  assert.equal(top.roughness, .05);
+  assert.equal(top.clearcoat, 1);
+  assert.equal(side.transmission, .95);
+  side.dispose(); top.dispose();
 });

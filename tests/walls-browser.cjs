@@ -41,17 +41,15 @@ const path = require('node:path');
       await page.evaluate(() => {
         const g = window.__toukan.game;
         for (const group of g.floorGroups) group.traverse(m => {
-          if (m.userData.surface === 'walls' || m.userData.dynamic && m.children.some(c => c.userData.surface === 'rib-edges')) {
-            if (!m.material.transparent || m.material.opacity > .3 || m.material.transmission > 0)
-              throw Error('Wall uses screen-space transmission or blocks the floor');
-            const edges = m.children.find(c => c.userData.surface === 'rib-edges');
-            if (!edges?.isLineSegments || !edges.material.depthTest) throw Error('Wall outline missing');
-            m.geometry.computeBoundingBox(); edges.geometry.computeBoundingBox();
-            if (!m.geometry.boundingBox.min.equals(edges.geometry.boundingBox.min) ||
-                !m.geometry.boundingBox.max.equals(edges.geometry.boundingBox.max)) throw Error('Body/edge bounds disagree');
+          if (m.isLineSegments) throw Error('Wireframe outline remains');
+          if (m.userData.surface === 'walls' || g.doors.some(d => d.mesh === m)) {
+            const [side, top] = m.material;
+            if (side.transmission !== .95 || top.opacity !== .65 ||
+                top.roughness !== .05 || top.clearcoat !== 1) throw Error('Plastic materials incorrect');
+            if (m.geometry.groups.length !== 2) throw Error('Top and side ranges missing');
           }
         });
-        if (g.ribAccents?.length) throw Error('Duplicated wall overlays remain');
+        if (!g.ribAccents.length) throw Error('Contact shadows missing');
       });
       // The same body and edge must move together when a door opens and in replay.
       await page.evaluate(() => {
@@ -79,8 +77,8 @@ const path = require('node:path');
           { x: 6, z: 7, type: 'door', rotation: 1 });
         g.load(stage);
         for (const d of g.doors) {
-          const edges = d.mesh.children.find(c => c.userData.surface === 'rib-edges');
-          if (!edges?.isLineSegments) throw Error('Vertical/horizontal door outline missing');
+          if (!Array.isArray(d.mesh.material) || d.mesh.children.some(c => c.isLineSegments))
+            throw Error('Door plastic material missing');
         }
       });
       await capture('junctions-top', 0, { x: 0, z: 0 });
@@ -103,3 +101,4 @@ const path = require('node:path');
     console.log(`PASS: ${version}, ${records.length} real WebGL captures at ${output}`);
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
+
