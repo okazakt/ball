@@ -93,49 +93,47 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
   });
   geometry.rotateX(-Math.PI / 2);
   geometry.translate(0, bevel, 0);
+  if (bevel) smoothMoldedNormals(geometry);
   return geometry;
 }
 
-// Walls use a straight extrusion with no rounding or bevel offsets. The same
-// united footprint is used for every placement, including L/T/cross junctions.
+// Extrusion duplicates vertices at cap/bevel seams. Share their normals so the
+// fillet reflects a continuous light strip instead of separate white facets.
+export function smoothMoldedNormals(geometry) {
+  const p = geometry.attributes.position, n = geometry.attributes.normal;
+  const sums = new Map(), keys = [];
+  for (let i = 0; i < p.count; i++) {
+    const key = [p.getX(i), p.getY(i), p.getZ(i)].map(v => Math.round(v * 1e6)).join(':');
+    keys.push(key);
+    const normal = sums.get(key) || new T.Vector3();
+    normal.add(new T.Vector3(n.getX(i), n.getY(i), n.getZ(i)));
+    sums.set(key, normal);
+  }
+  for (const normal of sums.values()) normal.normalize();
+  for (let i = 0; i < p.count; i++) {
+    const normal = sums.get(keys[i]);
+    n.setXYZ(i, normal.x, normal.y, normal.z);
+  }
+  return geometry;
+}
+
+// Straight footprint helper retained for geometry and junction diagnostics.
 export function ribGeometry(rectangles, height = 1) {
-  const footprint = rectangles.map(r => r.map(v => Math.round(v * 1e6) / 1e6));
-  return setRibFaces(solidGeometry(footprint, height));
+  return setRibFaces(solidGeometry(rectangles.map(r => r.map(v => Math.round(v * 1e6) / 1e6)), height));
 }
 
 export function ribMaterials() {
-  const side = new T.MeshPhysicalMaterial({
-    color: 0xffffff, transmission: 0.95, ior: 1.5,
-    thickness: 0.10, roughness: 0.02, metalness: 0,
-    opacity: 1, transparent: true, depthWrite: false,
-    clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.5,
+  return new T.MeshPhysicalMaterial({
+    color: 0xffffff, transmission: 0.95, ior: 1.52,
+    thickness: 1.5, roughness: 0.03, metalness: 0,
+    opacity: 1, transparent: false, depthWrite: true,
+    clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3.5,
   });
-  const top = new T.MeshPhysicalMaterial({
-    color: 0xffffff, transmission: 0.15, ior: 1.5,
-    thickness: 0.10, roughness: 0.05, metalness: 0,
-    opacity: 0.65, transparent: true, depthWrite: false,
-    clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.5,
-  });
-  return [side, top];
 }
 
 export function setRibFaces(geometry) {
-  // Shade the whole upper cross-section and its rounded shoulder as one rib.
-  // Vertical faces and the bottom stay clear; no outline geometry is added.
-  const normal = geometry.attributes.normal;
-  const count = geometry.index?.count ?? geometry.attributes.position.count;
-  const vertex = i => geometry.index ? geometry.index.getX(i) : i;
-  const faces = [[], []];
-  for (let i = 0; i < count; i += 3) {
-    const next = (normal.getY(vertex(i)) + normal.getY(vertex(i + 1)) +
-      normal.getY(vertex(i + 2))) / 3 > 0.05 ? 1 : 0;
-    faces[next].push(vertex(i), vertex(i + 1), vertex(i + 2));
-  }
-  // Two contiguous draw ranges avoid a draw call for each bevel triangle.
-  geometry.setIndex(faces[0].concat(faces[1]));
   geometry.clearGroups();
-  geometry.addGroup(0, faces[0].length, 0);
-  geometry.addGroup(faces[0].length, faces[1].length, 1);
+  geometry.addGroup(0, geometry.attributes.position.count, 0);
   return geometry;
 }
 
@@ -198,6 +196,25 @@ export function spaceTexture() {
       ctx.fillStyle = glow;
       ctx.fillRect(x - 9, y - 9, 18, 18);
     }
+  }
+  // Printed insert: opaque, high-contrast lines are included in Three's
+  // transmission render target and visibly bend through the molded walls.
+  const step = 96;
+  for (let x = 0; x <= canvas.width; x += step / 4) {
+    ctx.strokeStyle = x % step === 0 ? '#81c9dd' : '#344c72';
+    ctx.lineWidth = x % step === 0 ? 2.5 : 1;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y <= canvas.height; y += step / 4) {
+    ctx.strokeStyle = y % step === 0 ? '#81c9dd' : '#344c72';
+    ctx.lineWidth = y % step === 0 ? 2.5 : 1;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+  ctx.strokeStyle = '#ffd286'; ctx.fillStyle = '#d0eaff';
+  ctx.font = '11px monospace'; ctx.lineWidth = 2;
+  for (let x = step; x < canvas.width; x += step) for (let y = step; y < canvas.height; y += step) {
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillText(`${x / step}:${y / step}`, x + 10, y - 9);
   }
   const texture = new T.CanvasTexture(canvas);
   texture.encoding = T.sRGBEncoding;

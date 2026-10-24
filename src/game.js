@@ -1,5 +1,5 @@
 import { COLS, ROWS, GAP } from './stage.js';
-import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, setRibFaces, studioEnvironment } from './case-visuals.js';
+import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, setRibFaces, smoothMoldedNormals, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
@@ -44,19 +44,19 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
     this.renderer.outputEncoding = T.sRGBEncoding;
     this.renderer.toneMapping = T.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.25;
     this.renderer.autoClear = false;
     this.environmentTarget = studioEnvironment(this.renderer);
     this.scene.environment = this.environmentTarget.texture;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = T.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = T.PCFShadowMap;
     this.host.prepend(this.renderer.domElement);
     this.ambient = new T.HemisphereLight(0xc3e9ff, 0x103140, 0.35);
     this.scene.add(this.ambient);
-    this.sun = new T.DirectionalLight(0xffecd0, 1.25);
+    this.sun = new T.DirectionalLight(0xffecd0, 3.0);
     this.sun.position.set(4, 12, 3);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(512, 512);
+    this.sun.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sun.shadow.camera, { left: -7, right: 7, top: 8, bottom: -8 });
     this.scene.add(this.sun);
     this.sunTarget = new T.Object3D();
@@ -81,7 +81,6 @@ export class Game {
     const lidY = -(this.viewFloor || 0) * GAP + LID_Y;
     const eyeX = -Math.tan(this.tilt.z) * this.distance;
     const eyeZ = -Math.tan(this.tilt.x) * this.distance;
-    // Positive gravity tilt moves the eye oppositely, shifting the floor left/up.
     // Keep the optical axis perpendicular to the lid. The asymmetric frustum
     // passes through its four corners, so only objects below it show parallax.
     this.camera.up.set(0, 0, -1);
@@ -164,7 +163,6 @@ export class Game {
     this.lastRipple = -1;
     this.floorGroups = [];
     this.lidReflections = [];
-    this.ribAccents = [];
     this.activeFloor = 0;
     this.elapsed = 0;
     this.acc = 0;
@@ -225,10 +223,8 @@ export class Game {
       });
       if (wallRects.length) {
         const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.012, fillet: 0.038 })), wall, 0, y, 0, fi);
-        walls.castShadow = false;
+        walls.castShadow = true;
         walls.userData.surface = 'walls';
-        this.addRibAccents(walls, fi, y);
-
       }
       const frameRects = f.walls.filter(perimeter).map(w => {
         let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
@@ -241,9 +237,9 @@ export class Game {
       });
       if (frameRects.length) {
         const frameMat = new T.MeshPhysicalMaterial({
-          color: 0x269c67, roughness: 0.26, metalness: 0,
+          color: 0x269c67, roughness: 0.1, metalness: 0,
           transmission: 0, opacity: 1, transparent: false,
-          clearcoat: 1, clearcoatRoughness: 0.15, ior: 1.52, envMapIntensity: 0.5,
+          clearcoat: 1, clearcoatRoughness: 0.03, ior: 1.52, envMapIntensity: 2.0,
         });
         const frame = this.mesh(solidGeometry(frameRects, LID_Y, { bevel: 0.025, fillet: 0.045 }),
           frameMat, 0, y, 0, fi);
@@ -376,7 +372,6 @@ export class Game {
             { bevel: 0.012, fillet: 0.038 });
           doorGeometry.translate(0, -0.5, 0);
           const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
-
           mesh.userData.dynamic = true;
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
@@ -391,12 +386,11 @@ export class Game {
           geometry.rotateX(-Math.PI / 2);
           geometry.rotateY(-((c.rotation || 0) * Math.PI) / 2);
           geometry.translate(0, 0.012, 0);
+          smoothMoldedNormals(geometry);
           setRibFaces(geometry);
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
-          corner.castShadow = false;
+          corner.castShadow = true;
           corner.userData.surface = 'walls';
-          this.addRibAccents(corner, fi, y);
-
           const vertices = geometry.attributes.position.array;
           this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
             Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i))
@@ -472,22 +466,6 @@ export class Game {
     });
     this.sync();
     this.events.loaded?.();
-  }
-  addRibAccents(rib, fi, y) {
-    const accent = (color, opacity, additive, height) => {
-      const material = new T.MeshBasicMaterial({
-        color, transparent: true, opacity, depthWrite: false,
-        blending: additive ? T.AdditiveBlending : T.NormalBlending,
-      });
-      const mesh = this.mesh(rib.geometry.clone(), material, rib.position.x, y + height, rib.position.z, fi);
-      mesh.scale.y = 0.001;
-      mesh.castShadow = mesh.receiveShadow = false;
-      mesh.renderOrder = 1;
-      mesh.userData.surface = 'rib-accent';
-      return mesh;
-    };
-    this.ribAccents.push({ fi, shadow: accent(0x000000, 0.35, false, 0.004),
-      caustic: accent(0xb6dfff, 0.13, true, 0.007), x: rib.position.x, z: rib.position.z });
   }
   markCell(cell, y, fi, color, kind) {
     const p = cellPos(cell.x, cell.z);
@@ -1057,13 +1035,6 @@ export class Game {
       }
     this.sun.position.set(4 + this.tilt.z * 12, 12 - fi * GAP, 3 + this.tilt.x * 10);
     this.sunTarget.position.set(0, -fi * GAP, 0);
-    for (const accent of this.ribAccents) {
-      const dx = (4 + this.tilt.z * 12) * 0.012, dz = (3 + this.tilt.x * 10) * 0.012;
-      accent.shadow.position.x = accent.x - dx;
-      accent.shadow.position.z = accent.z - dz;
-      accent.caustic.position.x = accent.x + dx * 0.6;
-      accent.caustic.position.z = accent.z + dz * 0.6;
-    }
     this.board.rotation.set(0, 0, 0);
     this.updateCamera();
     for (let i = 0; i < this.lidReflections.length; i++) {

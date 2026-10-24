@@ -81,14 +81,14 @@ test('rounded plastic ribs remain valid at every grid placement', async () => {
         x + (vertical ? 3.8 : 103.8), z + (vertical ? 103.8 : 3.8)]], 1,
         { bevel: .012, fillet: .038 }));
       checkBody(geometry);
-      assert.equal(geometry.groups.length, 2);
+      assert.equal(geometry.groups.length, 1);
       assert.ok(geometry.groups.every(group => group.count > 0));
       geometry.dispose();
     }
-  const [side, top] = ribMaterials();
-  assert.equal(top.opacity, .65);
-  assert.equal(top.roughness, .05);
-  assert.equal(top.clearcoat, 1);
-  assert.equal(side.transmission, .95);
-  side.dispose(); top.dispose();
+  const material = ribMaterials();
+  assert.equal(material.transmission, .95);
+  assert.equal(material.ior, 1.52);
+  assert.equal(material.thickness, 1.5);
+  assert.equal(material.roughness, .03);
+  material.dispose();
 });

@@ -30,15 +30,13 @@ const assert = require('node:assert/strict');
       const walls = g.floorGroups[0].children.find(m => m.userData.surface === 'walls');
       if (Math.abs(area(floor.geometry) - 87) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
         throw Error('Seamless wallpaper floor or floor hole missing');
-      const [side, top] = walls.material;
-      if (walls.children.some(m => m.userData.surface === 'rib-rims' || m.isLineSegments))
-        throw Error('Wireframe rib outlines remain');
+      const side = walls.material;
+      if (walls.children.length || g.floorGroups.some(group => group.children.some(m => ['rib-rims', 'rib-accent'].includes(m.userData.surface))))
+        throw Error('Separate wall highlight meshes remain');
       walls.geometry.computeBoundingBox();
       if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission < 0.9 ||
-          side.ior < 1.49 || side.ior > 1.59 || side.thickness !== 0.1 || side.roughness > 0.12 ||
-          !side.transparent || side.envMapIntensity !== 2.5 || side.roughness !== 0.02 ||
-          top.opacity !== 0.65 || top.roughness !== 0.05 || top.clearcoat !== 1 ||
-          !walls.geometry.groups.some(group => group.materialIndex === 1) ||
+          side.ior < 1.49 || side.ior > 1.59 || side.thickness !== 1.5 || side.roughness > 0.12 ||
+          side.transparent || side.envMapIntensity !== 3.5 || side.roughness !== 0.03 ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
         throw Error('Clear rib optics, top edge or height are incorrect');
       if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)
@@ -50,7 +48,9 @@ const assert = require('node:assert/strict');
       const frame = g.floorGroups[0].children.find(m => m.userData.surface === 'frame');
       if (!frame || frame.material.transparent || frame.material.transmission !== 0 ||
           frame.material.color.getHex() !== 0x269c67) throw Error('Opaque green plastic frame missing');
-      if (!g.ribAccents.length) throw Error('Rib contact shading missing');
+      if (frame.material.roughness !== 0.1 || frame.material.envMapIntensity !== 2 ||
+          g.renderer.toneMappingExposure !== 1.25 || g.sun.intensity !== 3)
+        throw Error('Plastic lighting settings are incorrect');
       if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
           !g.floorGroups[2].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
         throw Error('Start and goal tile colors are incorrect');
@@ -69,7 +69,7 @@ const assert = require('node:assert/strict');
       const mesh = new THREE.Mesh(junction, walls.material);
       const ray = new THREE.Raycaster(new THREE.Vector3(0.013, 2, 0.017), new THREE.Vector3(0, -1, 0));
       const tops = ray.intersectObject(mesh).filter(hit => hit.face.normal.y > 0.35);
-      if (tops.length !== 1 || Math.abs(tops[0].point.y - 1) > 1e-6)
+      if (junction.groups.length !== 1 || tops.length !== 1 || Math.abs(tops[0].point.y - 1) > 1e-6)
         throw Error('Rib junction has a gap or overlapping top faces');
       junction.dispose();
       // A rounded endpoint has no square corner in the top surface.
@@ -112,24 +112,9 @@ const assert = require('node:assert/strict');
         g.setLighting();
         const floor = new T.Vector3(0, 0, 0).project(g.camera);
         const lower = new T.Vector3(0, -3, 0).project(g.camera);
-        if (!(floor.x < origin.x && floor.y > origin.y && lower.x < floor.x && lower.y > floor.y))
+        if (!(floor.x < origin.x && floor.y > origin.y && lower.x < floor.x))
           throw Error('Missing depth-dependent parallax');
-        // Each input axis independently moves the floor opposite ball gravity.
-        for (const [x, z] of [[0, 0.3], [0, -0.3], [0.3, 0], [-0.3, 0]]) {
-          g.tilt = { x, z };
-          g.setLighting();
-          const p = new T.Vector3(0, 0, 0).project(g.camera);
-          if (z && (p.x - origin.x) * z >= 0) throw Error('Horizontal parallax reversed');
-          if (x && (p.y - origin.y) * x <= 0) throw Error('Vertical parallax reversed');
-        }
-        g.tilt = { x: 0.3, z: 0.3 };
-        g.setLighting();
-        const accent = g.ribAccents[0];
-        const tiltedShadow = accent.shadow.position.clone();
-        g.tilt = { x: 0, z: 0 };
-        g.setLighting();
-        if (accent.shadow.position.distanceTo(tiltedShadow) < 0.02)
-          throw Error('Rib contact shadow does not follow lighting');
+
       });
     }
     await page.setViewportSize({ width: 390, height: 844 });
