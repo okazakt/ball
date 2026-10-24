@@ -1,3 +1,4 @@
+import { FRAME_CONTROLS } from './frame-plastic.js';
 import { wallDiagnostics } from './wall-diagnostics.js';
 import { keepScreenAwake } from './wake-lock.js';
 import { VERSION } from './version.js';
@@ -81,10 +82,30 @@ const game = new Game($('#viewport'), sound, {
 const wallPanel = document.createElement('details');
 wallPanel.id = 'wall-controls';
 const wallSummary = document.createElement('summary');
-wallSummary.textContent = '壁の固定値・描画診断';
+wallSummary.textContent = '外壁・緑プラ素材調整 / 壁の描画診断';
 wallPanel.append(wallSummary);
 const wallFields = document.createElement('div');
 wallFields.className = 'wall-fields';
+const frameTitle = document.createElement('h3');
+frameTitle.textContent = '外壁・緑プラ素材調整（自動ドア共通）';
+wallFields.append(frameTitle);
+for (const [key, title, min, max] of FRAME_CONTROLS) {
+  const label = document.createElement('label');
+  const caption = document.createElement('span');
+  caption.textContent = `${title} / ${key}`;
+  const input = document.createElement('input');
+  Object.assign(input, { id: key, type: 'range', min, max, step: .01, value: game.frameSettings[key] });
+  label.htmlFor = key;
+  const output = document.createElement('output');
+  output.htmlFor = key;
+  output.value = Number(input.value).toFixed(2);
+  input.addEventListener('input', () => {
+    output.value = Number(input.value).toFixed(2);
+    game.updateFrameSettings({ [key]: Number(input.value) });
+  });
+  label.append(caption, output, input);
+  wallFields.append(label);
+}
 const diagnosticButton = document.createElement('button');
 diagnosticButton.id = 'wall-diagnose';
 diagnosticButton.type = 'button';

@@ -1,3 +1,4 @@
+import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
 import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
@@ -31,11 +32,30 @@ export class Game {
     this.gyro = false;
     this.quest = true;
     this.wallSettings = { ...FIXED_WALL_SETTINGS };
+    this.frameSettings = { ...FRAME_DEFAULTS };
     this.wallMaterials = new Set();
     this.wallColliders = [];
     this.rippleGeometry=new T.RingGeometry(.12,.145,32);
     this.rippleMaterial=new T.MeshBasicMaterial({color:0xffc17c,transparent:true,opacity:.7,depthTest:false,depthWrite:false,side:T.DoubleSide});
     this.setupInput();
+  }
+  updateFrameSettings(patch) {
+    const before = { ...this.frameSettings };
+    for (const [key,,min,max] of FRAME_CONTROLS) {
+      if (Number.isFinite(patch[key])) this.frameSettings[key] = clamp(patch[key], min, max);
+    }
+    const rebuild = before.frameBevel !== this.frameSettings.frameBevel ||
+      before.frameCornerRadius !== this.frameSettings.frameCornerRadius;
+    this.board?.traverse(mesh => {
+      if (!mesh.material?.userData.frameUniforms) return;
+      applyFrameSettings(mesh.material, this.frameSettings);
+      if (rebuild && mesh.userData.frameGeometryFactory) {
+        const old = mesh.geometry;
+        mesh.geometry = mesh.userData.frameGeometryFactory();
+        old.dispose();
+      }
+    });
+    if (this.ready && this.stage) this.renderScene();
   }
   updateWallSettings(patch) {
     const oldRadius = this.wallSettings.cornerRadius, oldThickness = this.wallSettings.wallThickness;
@@ -317,14 +337,11 @@ export class Game {
         return [x - 5, z - 7.5, x + 5, z + 107.5];
       });
       if (frameRects.length && fi === 0) {
-        const frameMat = new T.MeshPhysicalMaterial({
-          color: 0x269c67, roughness: 0.1, metalness: 0,
-          transmission: 0, opacity: 1, transparent: false,
-          clearcoat: 1, clearcoatRoughness: 0.03, ior: 1.52, envMapIntensity: 2.0,
-        });
-        // One continuous shell, without bevels or caps at the floor junction.
-        const frame = this.mesh(solidGeometry(frameRects, GAP + LID_Y + FLOOR_THICKNESS, { bevel: 0.025, fillet: 0.045 }),
-          frameMat, 0, -GAP - FLOOR_THICKNESS, 0, fi);
+        const height = GAP + LID_Y + FLOOR_THICKNESS;
+        const factory = () => frameGeometry(frameRects, height, this.frameSettings);
+        const frame = this.mesh(factory(), prepareFramePlastic(this.casePlastic(), this.frameSettings, height),
+          0, -GAP - FLOOR_THICKNESS, 0, fi);
+        frame.userData.frameGeometryFactory = factory;
         frame.userData.surface = 'frame';
         frame.castShadow = false;
       }
@@ -641,13 +658,13 @@ export class Game {
     const spec=doorSpec(c,fi),pose=doorPose(spec,0);
     const body=this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x,pose.panelY,spec.z));
     const collider=this.world.createCollider(this.R.ColliderDesc.cuboid(spec.halfX,.46,spec.halfZ).setFriction(.1).setRestitution(0),body);
-    const geometry=solidGeometry([[-spec.halfX*100,-spec.halfZ*100,spec.halfX*100,spec.halfZ*100]],.92,
-      {bevel:.012,bevelOffset:-.012,fillet:.018}).translate(0,-.46,0);
-    const mesh=this.mesh(geometry,prepareSpatialMaterial(this.casePlastic()),spec.x,pose.panelY,spec.z,fi);
+    const factory = () => frameGeometry([[-spec.halfX*100,-spec.halfZ*100,spec.halfX*100,spec.halfZ*100]], .92, this.frameSettings, true);
+    const mesh=this.mesh(factory(),prepareFramePlastic(prepareSpatialMaterial(this.casePlastic()),this.frameSettings,.92,-.46),spec.x,pose.panelY,spec.z,fi);
+    mesh.userData.frameGeometryFactory = factory;
     mesh.userData.dynamic=true;mesh.userData.surface='door';mesh.castShadow=false;
     const postBody=this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x,pose.postY,spec.z));
     const postCollider=this.world.createCollider(this.R.ColliderDesc.cylinder(pose.postHeight/2,.055).setFriction(.1).setRestitution(0),postBody);
-    const post=this.mesh(new T.CylinderGeometry(.055,.055,1,16),this.casePlastic(),spec.x,pose.postY,spec.z,1);
+    const post=this.mesh(new T.CylinderGeometry(.055,.055,1,32),prepareFramePlastic(this.casePlastic(),this.frameSettings,1,-.5),spec.x,pose.postY,spec.z,1);
     post.scale.y=pose.postHeight;post.userData.dynamic=true;post.userData.surface='door-post';post.castShadow=false;
     this.doors.push({c,fi,...spec,body,collider,postBody,postCollider,mesh,post,slide:0,nextSlide:0,open:false});
   }
