@@ -53,14 +53,18 @@ const fs = require('node:fs');
     const visualChanges = [];
     for (const [key, min, max] of [['edgeWidth', .05, .5], ['edgeBrightness', 0, 5],
       ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1], ['lightAngle', 0, 3.14], ['specularSharpness', 1, 20], ['resinTint', 0, 1], ['topFusion', 0, 1], ['wallThickness', .5, 2], ['bottomFusion', 0, 1], ['resinDensity', 0, 1]]) {
+      if (process.env.WALL_SLIDER_KEYS && !process.env.WALL_SLIDER_KEYS.split(',').includes(key)) continue;
       console.log('Checking slider:', key);
-      await page.evaluate(() => {
+      await page.evaluate(key => {
         const g = window.__toukan.game;
         g.tilt = { x: .35, z: -.35 };
         g.updateWallSettings({ edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35,
           centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2, topFusion: .4, wallThickness: 1, bottomFusion: .4, resinDensity: .5 });
+        // Color is now independent of opacity. Use the reported body opacity
+        // so a color change is measurable without adding artificial whiteness.
+        if (key === 'resinTint') g.updateWallSettings({ centerOpacity: .34 });
         window.wallPixels = null;
-      });
+      }, key);
       await page.waitForTimeout(150);
       for (const value of [min, max]) {
         const oldGeometry = ['cornerRadius', 'wallThickness'].includes(key) ? await page.evaluate(() => [...window.__toukan.game.wallMaterials].length && window.__toukan.game.floorGroups[0].children.find(m => m.userData.surface === 'walls').geometry.uuid) : null;
@@ -227,6 +231,6 @@ const fs = require('node:fs');
     await page.screenshot({ path: '/workspace/ball-captures/clear-molded/tilted.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.deepEqual(errors, []);
-    console.log('PASS: fourteen sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
+    console.log('PASS: slider rendering, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

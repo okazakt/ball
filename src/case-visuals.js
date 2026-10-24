@@ -309,6 +309,15 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       }
       float wallSafeChannel(float v) { return v >= 0.0 && v <= 65504.0 ? v : 0.0; }
       vec3 wallSafeRadiance(vec3 v) { return vec3(wallSafeChannel(v.r), wallSafeChannel(v.g), wallSafeChannel(v.b)); }
+      vec3 wallBackgroundColor(vec2 uv, inout bool invalid) {
+        vec3 radiance = texture2D(wallBackground, uv).rgb;
+        invalid = invalid || !wallValidRadiance(radiance);
+        radiance = wallSafeRadiance(radiance);
+        #if defined(TONE_MAPPING)
+          radiance = toneMapping(radiance);
+        #endif
+        return linearToOutputTexel(vec4(radiance, 1.0)).rgb;
+      }
       uniform float bottomFusion; uniform float resinDensity; uniform float wallBottomContact;
       uniform float lightAngle; uniform float specularSharpness; uniform float resinTint; uniform float cornerRadius;
       uniform float topFusion; uniform float wallThickness; uniform float wallShapeThickness; uniform float wallContact;
@@ -345,49 +354,59 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       float crown = pow(clamp(1.0 - distanceToEdge / max(width, 0.0001), 0.0, 1.0), mix(0.85, 0.35, cornerRadius));
       float bandVolume = edge * (0.88 + 0.12 * crown);
       float edgeAlpha = bandVolume * (1.0 - exp(-edgeBrightness * directionalGain * (0.65 + 0.2 * fresnel)));
-      // Beer-Lambert style path attenuation, independent of tint and reflections.
+      // Density controls only the transmitted background diffusion.
       float density = 1.0 - exp(-resinDensity * wallThickness * (0.8 + 0.6 * wallSide));
-      float bodyAlpha = 1.0 - (1.0 - centerOpacity) * (1.0 - 0.24 * resinTint) * (1.0 - density * 0.48);
+      float bodyAlpha = centerOpacity;
       float fusionWidth = max(width * 1.3, 0.012 * wallShapeThickness);
       float fusionBand = (1.0 - smoothstep(fusionWidth * 0.6, fusionWidth + aa, distanceToEdge))
         * smoothstep(0.95, 0.998, wallY);
       float fusionAlpha = clamp(topFusion * wallContact * fusionBand * (0.2 + 0.55 * facing), 0.0, 0.9);
       float bottomBand = wallSide * (1.0 - smoothstep(0.008, 0.065 + bottomFusion * 0.035, wallY));
       float bottomAlpha = clamp(bottomFusion * wallBottomContact * bottomBand * (0.3 + 0.55 * facing), 0.0, 0.9);
-      float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha) * (1.0 - fusionAlpha) * (1.0 - bottomAlpha);
+      float reflectionCoverage = 1.0 - (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha) * (1.0 - fusionAlpha) * (1.0 - bottomAlpha);
+      float coverage = bodyAlpha + (1.0 - bodyAlpha) * reflectionCoverage;
       vec3 surfaceReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
       bool wallBadReflection = !wallValidRadiance(surfaceReflection);
       surfaceReflection = wallSafeRadiance(surfaceReflection);
       vec3 resinColor = mix(vec3(1.0), vec3(0.6, 0.91, 1.0), resinTint);
-      outgoingLight = mix(resinColor, vec3(1.0), edgeAlpha)
+      vec3 reflectionColor = mix(vec3(1.0), resinColor, 0.25);
+      outgoingLight = (resinColor * bodyAlpha * (1.0 - reflectionCoverage) + reflectionColor * reflectionCoverage) / max(coverage, 0.00001)
         + vec3(bandVolume * edgeBrightness * (0.12 + 0.18 * glint)) + surfaceReflection * sideGloss
         + fusionAlpha * (vec3(0.18 + 0.42 * glint) + surfaceReflection * 0.5);
-      // Nine screen-space samples diffuse the actual floor/balls, without refraction offset.
+      // Average display-space samples: HDR averaging would brighten fine detail.
       vec2 screenUV = gl_FragCoord.xy / wallResolution;
       float radius = resinDensity * (2.0 + 8.0 * resinDensity) * sqrt(wallThickness);
       vec2 spread = vec2(radius) / wallResolution;
       vec3 blurred = vec3(0.0);
+      bool wallBackgroundInvalid = false;
       // A disabled density must never read an old/uninitialized HDR texture:
       // multiplying its result by zero would still propagate NaN on the GPU.
       if (resinDensity > 0.0) {
-      blurred = texture2D(wallBackground, screenUV).rgb * 0.25;
-      blurred += (texture2D(wallBackground, screenUV + vec2(spread.x, 0.0)).rgb
-        + texture2D(wallBackground, screenUV - vec2(spread.x, 0.0)).rgb
-        + texture2D(wallBackground, screenUV + vec2(0.0, spread.y)).rgb
-        + texture2D(wallBackground, screenUV - vec2(0.0, spread.y)).rgb) * 0.125;
-      blurred += (texture2D(wallBackground, screenUV + spread).rgb
-        + texture2D(wallBackground, screenUV - spread).rgb
-        + texture2D(wallBackground, screenUV + spread * vec2(1.0, -1.0)).rgb
-        + texture2D(wallBackground, screenUV + spread * vec2(-1.0, 1.0)).rgb) * 0.0625;
+      blurred = wallBackgroundColor(screenUV, wallBackgroundInvalid) * 0.25;
+      blurred += (wallBackgroundColor(screenUV + vec2(spread.x, 0.0), wallBackgroundInvalid)
+        + wallBackgroundColor(screenUV - vec2(spread.x, 0.0), wallBackgroundInvalid)
+        + wallBackgroundColor(screenUV + vec2(0.0, spread.y), wallBackgroundInvalid)
+        + wallBackgroundColor(screenUV - vec2(0.0, spread.y), wallBackgroundInvalid)) * 0.125;
+      blurred += (wallBackgroundColor(screenUV + spread, wallBackgroundInvalid)
+        + wallBackgroundColor(screenUV - spread, wallBackgroundInvalid)
+        + wallBackgroundColor(screenUV + spread * vec2(1.0, -1.0), wallBackgroundInvalid)
+        + wallBackgroundColor(screenUV + spread * vec2(-1.0, 1.0), wallBackgroundInvalid)) * 0.0625;
       }
-      bool wallBadBackground = !wallValidRadiance(blurred);
+      bool wallBadBackground = wallBackgroundInvalid || !wallValidRadiance(blurred);
       float scattering = wallBadBackground ? 0.0 : density * 0.75;
       blurred = wallSafeRadiance(blurred);
       float finalCoverage = coverage + (1.0 - coverage) * scattering;
-      outgoingLight = (outgoingLight * coverage + blurred * scattering * (1.0 - coverage)) / max(finalCoverage, 0.00001)
-        + bottomAlpha * vec3(0.2 + 0.35 * glint);
-      diffuseColor.a = finalCoverage;
+      outgoingLight += bottomAlpha * vec3(0.2 + 0.35 * glint);
+      diffuseColor.a = coverage;
       #include <output_fragment>
+    `);
+    // The canvas blends in output color space. Transform the background and
+    // reflected/body colors independently before compositing; otherwise tone
+    // mapping a pre-mixed HDR color makes density brighten the wall again.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <encodings_fragment>', `
+      #include <encodings_fragment>
+      gl_FragColor.rgb = (gl_FragColor.rgb * coverage + blurred * scattering * (1.0 - coverage)) / max(finalCoverage, 0.00001);
+      gl_FragColor.a = finalCoverage;
     `);
     // Diagnostic colors are written after tone mapping, with other surfaces
     // hidden in an offscreen pass. Green marks a wall; red/blue mark bad math.
@@ -397,7 +416,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
         gl_FragColor = vec4(wallBadReflection ? 1.0 : 0.0, 1.0, wallBadBackground ? 1.0 : 0.0, 1.0);
     `);
   };
-  material.customProgramCacheKey = () => 'clear-molded-wall-v7';
+  material.customProgramCacheKey = () => 'clear-molded-wall-v8';
   material.extensions = { derivatives: true };
   return material;
 }
