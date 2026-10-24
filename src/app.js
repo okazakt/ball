@@ -100,6 +100,8 @@ for (const [key, title, min, max] of [
   ['lightAngle', '光源の角度 / lightAngle', 0, 3.14],
   ['specularSharpness', '光の鋭さ / specularSharpness', 1, 20],
   ['resinTint', '樹脂の色味・ミルク感 / resinTint', 0, 1],
+  ['topFusion', '天井との結合部 / topFusion', 0, 1],
+  ['wallThickness', '壁の厚み・ボリューム / wallThickness', 0.5, 2],
 ]) {
   const label = document.createElement('label');
   label.htmlFor = `wall-${key}`;

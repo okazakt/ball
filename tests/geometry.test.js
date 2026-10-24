@@ -117,7 +117,7 @@ test('rounded transparent walls remain valid at every grid placement', async () 
   assert.equal(material.depthWrite, false);
   assert.equal(material.transparent, true);
   assert.equal(material.userData.wallUniforms.centerOpacity.value, .04);
-  assert.equal(Object.keys(material.userData.wallUniforms).length, 10);
+  assert.equal(Object.keys(material.userData.wallUniforms).length, 12);
   material.dispose();
 });
 
@@ -139,5 +139,43 @@ test('corner radius preserves U caps and valid L/T/cross junctions at both extre
     assert.ok(ray(1.02, 0).length, 'rounded tip should retain its center');
     assert.equal(ray(1.03, .03).length, 0, 'tip should be U shaped, not square');
     geometry.dispose(); material.dispose();
+  }
+});
+
+test('wall thickness changes real geometry without moving centerlines or losing round caps', async () => {
+  const { wallGeometry, curvedWallGeometry, WALL_DEFAULTS } = await import('../src/case-visuals.js');
+  const T = context.THREE;
+  for (const wallThickness of [.5, 1, 2]) {
+    const settings = { ...WALL_DEFAULTS, wallThickness };
+    const radius = .038 * wallThickness;
+    for (const vertical of [false, true]) {
+      const geometry = wallGeometry([[-3.8, -3.8, vertical ? 3.8 : 103.8, vertical ? 103.8 : 3.8]], settings);
+      checkBody(geometry);
+      const { min, max } = geometry.boundingBox;
+      assert.ok(Math.abs((vertical ? max.x - min.x : max.z - min.z) - radius * 2) < 1e-6);
+      assert.ok(Math.abs((vertical ? max.z + min.z : max.x + min.x) / 2 - .5) < 1e-6);
+      const material = new T.MeshBasicMaterial(), mesh = new T.Mesh(geometry, material);
+      const at = (r, angle) => {
+        const along = 1 + r * Math.cos(angle), across = r * Math.sin(angle);
+        return new T.Vector3(vertical ? across : along, 2, vertical ? along : across);
+      };
+      for (const angle of [-1.2, -.6, 0, .6, 1.2]) {
+        const ray = point => new T.Raycaster(point, new T.Vector3(0, -1, 0)).intersectObject(mesh);
+        assert.ok(ray(at(radius * .96, angle)).length);
+        assert.equal(ray(at(radius * 1.04, angle)).length, 0);
+      }
+      geometry.dispose(); material.dispose();
+    }
+    const curved = curvedWallGeometry(0, settings);
+    checkBody(curved);
+    assert.ok(Math.abs(curved.boundingBox.min.x + radius) < 1e-6);
+    assert.ok(Math.abs(curved.boundingBox.max.x - .38 - radius) < 1e-6);
+    curved.dispose();
+    const arms = [[-103.8, -3.8, 3.8, 3.8], [-3.8, -3.8, 103.8, 3.8],
+      [-3.8, -103.8, 3.8, 3.8], [-3.8, -3.8, 3.8, 103.8]];
+    for (const mask of [3, 5, 7, 15]) {
+      const junction = wallGeometry(arms.filter((_, i) => mask & (1 << i)), settings);
+      checkBody(junction); junction.dispose();
+    }
   }
 });

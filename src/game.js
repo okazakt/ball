@@ -27,18 +27,31 @@ export class Game {
     this.quest = true;
     this.wallSettings = { ...WALL_DEFAULTS };
     this.wallMaterials = new Set();
+    this.wallColliders = [];
     this.setupInput();
   }
   updateWallSettings(patch) {
-    const oldRadius = this.wallSettings.cornerRadius;
+    const oldRadius = this.wallSettings.cornerRadius, oldThickness = this.wallSettings.wallThickness;
     Object.assign(this.wallSettings, patch);
     for (const material of this.wallMaterials) applyWallSettings(material, this.wallSettings);
-    if (oldRadius !== this.wallSettings.cornerRadius) {
+    if (oldThickness !== this.wallSettings.wallThickness) this.updateWallColliders();
+    if (oldRadius !== this.wallSettings.cornerRadius || oldThickness !== this.wallSettings.wallThickness) {
       clearTimeout(this.wallGeometryTimer);
       // Rebuild only after the thumb pauses, so the other controls stay fluid.
       this.wallGeometryTimer = setTimeout(() => this.refreshWallGeometry(), 80);
     }
     this.renderScene();
+  }
+  wallHalfExtents(vertical, door = false) {
+    const thickness = this.wallSettings.wallThickness;
+    const half = 0.038 * thickness + 0.012;
+    const length = door ? 0.5 + 0.038 * (thickness - 1) : 0.5 + half;
+    return { x: vertical ? half : length, y: 0.5, z: vertical ? length : half };
+  }
+  updateWallColliders() {
+    for (const { collider, vertical, door } of this.wallColliders)
+      collider.setHalfExtents(this.wallHalfExtents(vertical, door));
+    for (const ball of this.balls || []) ball.body.wakeUp();
   }
   refreshWallGeometry() {
     if (!this.board) return;
@@ -49,6 +62,12 @@ export class Game {
       mesh.geometry.dispose(); mesh.material.alphaMap.dispose();
       mesh.geometry = geometry; mesh.material.alphaMap = texture;
       mesh.material.userData.wallDistance.value = texture;
+      mesh.material.userData.wallShapeThickness.value = geometry.userData.wallThickness;
+      if (mesh.userData.wallCollider) {
+        const vertices = geometry.attributes.position.array;
+        mesh.userData.wallCollider.setShape(new this.R.TriMesh(vertices,
+          Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i)));
+      }
       mesh.material.userData.wallTexel.value.set(1 / texture.image.width, 1 / texture.image.height);
     });
     this.renderScene();
@@ -141,7 +160,8 @@ export class Game {
     });
   }
   mesh(geo, mat, x, y, z, f = 0, parent = this.board) {
-    if (mat.isWallTemplate) {
+    const isWall = mat.isWallTemplate;
+    if (isWall) {
       mat = ribMaterials(this.wallSettings, geo);
       this.wallMaterials.add(mat);
     }
@@ -150,6 +170,11 @@ export class Game {
     m.castShadow = true;
     m.receiveShadow = true;
     m.layers.set(f + 1);
+    if (isWall) m.onBeforeRender = () => {
+      const top = m.position.y + m.geometry.boundingBox.max.y;
+      // The lid's underside is at floor + 1. Opening doors lose the weld glow.
+      m.material.userData.wallContact.value = clamp(1 - Math.abs(top - (-f * GAP + 1)) / 0.07, 0, 1);
+    };
     if (this.stage?.floors[f]?.dark)
       for (const material of Array.isArray(m.material) ? m.material : [m.material])
         if (material.envMapIntensity !== undefined) material.envMapIntensity = 0;
@@ -224,6 +249,7 @@ export class Game {
     this.board.rotation.set(0, 0, 0);
     this.updateCamera();
     this.wallMaterials.clear();
+    this.wallColliders = [];
     stage.floors.forEach((f, fi) => {
       const y = -fi * GAP;
       const group = new T.Group();
@@ -284,11 +310,13 @@ export class Game {
         frame.castShadow = false;
       }
       for (const w of f.walls) {
-        const p = cellPos(w.x, w.z);
-        this.world.createCollider(this.R.ColliderDesc.cuboid(w.axis === 'h' ? 0.55 : 0.05,
-          0.5, w.axis === 'h' ? 0.05 : 0.55)
+        const p = cellPos(w.x, w.z), vertical = w.axis === 'v';
+        const half = perimeter(w) ? { x: vertical ? 0.05 : 0.55, y: 0.5, z: vertical ? 0.55 : 0.05 }
+          : this.wallHalfExtents(vertical);
+        const collider = this.world.createCollider(this.R.ColliderDesc.cuboid(half.x, half.y, half.z)
           .setTranslation(p.x + (w.axis === 'h' ? 0 : -0.5), y + 0.5,
             p.z + (w.axis === 'h' ? -0.5 : 0)).setFriction(0.1).setRestitution(0.7));
+        if (!perimeter(w)) this.wallColliders.push({ collider, vertical, door: false });
       }
       const coverMat = new T.MeshPhysicalMaterial({
         color: 0xffffff, transparent: true, opacity: 0.012,
@@ -399,12 +427,14 @@ export class Game {
             this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, y + 0.5, p.z)
           );
           const vertical = (c.rotation || 0) % 2 === 1;
-          this.world.createCollider(
-            this.R.ColliderDesc.cuboid(vertical ? 0.05 : 0.5, 0.5, vertical ? 0.5 : 0.05)
+          const half = this.wallHalfExtents(vertical, true);
+          const collider = this.world.createCollider(
+            this.R.ColliderDesc.cuboid(half.x, half.y, half.z)
               .setFriction(0.1)
               .setRestitution(0.7),
             body
           );
+          this.wallColliders.push({ collider, vertical, door: true });
           const halfX = vertical ? 3.8 : 48.8, halfZ = vertical ? 48.8 : 3.8;
           const factory = () => wallGeometry([[-halfX, -halfZ, halfX, halfZ]], this.wallSettings).translate(0, -0.5, 0);
           const mesh = this.mesh(factory(), wall, p.x, y + 0.5, p.z, fi);
@@ -421,7 +451,7 @@ export class Game {
           corner.castShadow = false;
           corner.userData.surface = 'walls';
           const vertices = geometry.attributes.position.array;
-          this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
+          corner.userData.wallCollider = this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
             Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i))
             .setTranslation(p.x, y, p.z).setFriction(0.1).setRestitution(0.7));
         }

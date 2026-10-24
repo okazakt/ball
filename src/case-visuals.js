@@ -136,23 +136,32 @@ export const WALL_DEFAULTS = Object.freeze({
   edgeWidth: 0.25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: 0.35,
   centerOpacity: 0.04, taperAngle: 0.35, cornerRadius: 0.5,
   lightAngle: 0.78, specularSharpness: 8, resinTint: 0.2,
+  topFusion: 0.4, wallThickness: 1,
 });
 
 // A single united extrusion preserves the rounded outline at all junctions.
 export function wallGeometry(rectangles, settings = WALL_DEFAULTS) {
-  const bevel = 0.002 + settings.cornerRadius * 0.004;
-  return setRibFaces(solidGeometry(rectangles, 1, {
-    bevel, bevelOffset: -bevel, bevelSegments: 5, fillet: 0.038,
-    cornerFillet: settings.cornerRadius * 0.076, outlineSegments: 16,
-  }));
+  const thickness = settings.wallThickness ?? 1;
+  const bevel = (0.002 + settings.cornerRadius * 0.004) * thickness;
+  // Expand the segment footprints before union: centerlines and U-cap centers
+  // stay fixed, and thick L/T/cross junctions still have no overlapping faces.
+  const offset = (thickness - 1) * 3.8;
+  const expanded = rectangles.map(([x0, z0, x1, z1]) => [x0 - offset, z0 - offset, x1 + offset, z1 + offset]);
+  const geometry = solidGeometry(expanded, 1, {
+    bevel, bevelOffset: -bevel, bevelSegments: 5, fillet: 0.038 * thickness,
+    cornerFillet: settings.cornerRadius * 0.076 * thickness, outlineSegments: 16,
+  });
+  geometry.userData.wallThickness = thickness;
+  return setRibFaces(geometry);
 }
 
 export function curvedWallGeometry(rotation, settings = WALL_DEFAULTS) {
-  const shape = new T.Shape(), bevel = 0.002 + settings.cornerRadius * 0.004;
-  shape.absarc(0, 0, 0.418, 0, -Math.PI / 2, true);
-  shape.absarc(0, -0.38, 0.038, -Math.PI / 2, Math.PI / 2, true);
-  shape.absarc(0, 0, 0.342, -Math.PI / 2, 0, false);
-  shape.absarc(0.38, 0, 0.038, Math.PI, 0, true);
+  const thickness = settings.wallThickness ?? 1, radius = 0.038 * thickness;
+  const shape = new T.Shape(), bevel = (0.002 + settings.cornerRadius * 0.004) * thickness;
+  shape.absarc(0, 0, 0.38 + radius, 0, -Math.PI / 2, true);
+  shape.absarc(0, -0.38, radius, -Math.PI / 2, Math.PI / 2, true);
+  shape.absarc(0, 0, 0.38 - radius, -Math.PI / 2, 0, false);
+  shape.absarc(0.38, 0, radius, Math.PI, 0, true);
   shape.closePath();
   const points = shape.getPoints(24).filter((point, i, all) =>
     !i || point.distanceTo(all[i - 1]) > 1e-7);
@@ -167,6 +176,7 @@ export function curvedWallGeometry(rotation, settings = WALL_DEFAULTS) {
   geometry.rotateY(-rotation * Math.PI / 2);
   geometry.translate(0, bevel, 0);
   smoothMoldedNormals(geometry);
+  geometry.userData.wallThickness = thickness;
   return setRibFaces(geometry);
 }
 
@@ -214,7 +224,7 @@ export function prepareClearWall(geometry) {
   }
   const rgba = new Uint8Array(width * height * 4), worldPixel = Math.min(spanX / width, spanZ / height);
   for (let i = 0; i < distance.length; i++) {
-    rgba[i * 4] = Math.min(255, Math.round(distance[i] * worldPixel / 0.06 * 255));
+    rgba[i * 4] = Math.min(255, Math.round(distance[i] * worldPixel / 0.12 * 255));
     rgba[i * 4 + 3] = 255;
   }
   const outward = new Float32Array(p.count * 2);
@@ -259,6 +269,8 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
   // lifecycle releases it on retries and stage changes.
   material.alphaMap = geometry ? prepareClearWall(geometry) : null;
   material.userData.wallDistance = { value: material.alphaMap };
+  material.userData.wallShapeThickness = { value: geometry?.userData.wallThickness ?? settings.wallThickness };
+  material.userData.wallContact = { value: 1 };
   material.userData.wallTexel = { value: new T.Vector2(
     1 / (material.alphaMap?.image.width || 1), 1 / (material.alphaMap?.image.height || 1)) };
   material.onBeforeCompile = shader => {
@@ -266,26 +278,31 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
     for (const key of Object.keys(WALL_DEFAULTS)) shader.uniforms[key] = uniforms[key];
     shader.uniforms.wallDistance = material.userData.wallDistance;
     shader.uniforms.wallTexel = material.userData.wallTexel;
+    shader.uniforms.wallShapeThickness = material.userData.wallShapeThickness;
+    shader.uniforms.wallContact = material.userData.wallContact;
     shader.vertexShader = `attribute vec2 wallPlanar; attribute vec2 wallOutward; attribute float wallHeight;
-      uniform float taperAngle; varying vec2 wallUV; varying vec2 wallDir; varying float wallY; varying float wallSide;\n` + shader.vertexShader;
+      uniform float taperAngle; uniform float wallThickness; uniform float wallShapeThickness; varying vec2 wallUV; varying vec2 wallDir; varying float wallY; varying float wallSide;\n` + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `
       #include <beginnormal_vertex>
-      objectNormal.y += length(objectNormal.xz) * taperAngle * 0.0038;
+      objectNormal.y += length(objectNormal.xz) * taperAngle * 0.0038 * wallThickness;
       objectNormal = normalize(objectNormal);
     `).replace('#include <begin_vertex>', `
       #include <begin_vertex>
-      transformed.xz -= wallOutward * taperAngle * 0.0038 * wallHeight;
+      // Immediate geometric preview while the united extrusion is rebuilt.
+      transformed.xz += wallOutward * (wallThickness - wallShapeThickness) * 0.038;
+      transformed.xz -= wallOutward * taperAngle * 0.0038 * wallThickness * wallHeight;
       wallUV = wallPlanar; wallY = wallHeight; wallDir = wallOutward;
       wallSide = 1.0 - abs(normal.y);
     `);
     shader.fragmentShader = `uniform sampler2D wallDistance; uniform vec2 wallTexel;
       uniform float lightAngle; uniform float specularSharpness; uniform float resinTint; uniform float cornerRadius;
+      uniform float topFusion; uniform float wallThickness; uniform float wallShapeThickness; uniform float wallContact;
       uniform float edgeWidth; uniform float edgeBrightness; uniform float sideGloss; uniform float bottomEdge; uniform float centerOpacity;
       varying vec2 wallUV; varying vec2 wallDir; varying float wallY; varying float wallSide;\n` + shader.fragmentShader;
     // Alpha is determined by reflection coverage, never by diffuse illumination.
     shader.fragmentShader = shader.fragmentShader.replace('#include <alphamap_fragment>', '');
     shader.fragmentShader = shader.fragmentShader.replace('#include <output_fragment>', `
-      float distanceToEdge = texture2D(wallDistance, wallUV).r * 0.06;
+      float distanceToEdge = texture2D(wallDistance, wallUV).r * 0.12;
       vec2 gradient = vec2(
         texture2D(wallDistance, wallUV - vec2(wallTexel.x, 0.0)).r - texture2D(wallDistance, wallUV + vec2(wallTexel.x, 0.0)).r,
         texture2D(wallDistance, wallUV - vec2(0.0, wallTexel.y)).r - texture2D(wallDistance, wallUV + vec2(0.0, wallTexel.y)).r);
@@ -299,7 +316,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       float aa = max(fwidth(distanceToEdge), 0.0006);
       // Each band occupies this fraction of the top face; the backlit edge
       // fades more softly while the lit edge follows the sharpness control.
-      float width = edgeWidth * 0.068;
+      float width = edgeWidth * 0.068 * wallShapeThickness;
       float softness = mix(0.35, 0.06, (specularSharpness - 1.0) / 19.0);
       float feather = width * mix(0.38, softness, facing);
       float edge = (1.0 - smoothstep(width - feather - aa, width + aa, distanceToEdge))
@@ -307,23 +324,28 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       float fresnel = pow(1.0 - clamp(abs(dot(normal, geometry.viewDir)), 0.0, 1.0), 3.0);
       float reach = mix(0.22, 0.95, clamp(sideGloss / 3.0, 0.0, 1.0));
       float verticalGloss = smoothstep(1.0 - reach, 1.0, wallY);
-      float glare = clamp(sideGloss * wallSide * verticalGloss * (0.12 + 0.3 * fresnel) * (0.3 + 0.7 * facing), 0.0, 0.9);
+      float glare = clamp(sideGloss * wallSide * verticalGloss * pow(wallThickness, 0.35) * (0.12 + 0.3 * fresnel) * (0.3 + 0.7 * facing), 0.0, 0.9);
       float rootBand = wallSide * (1.0 - smoothstep(0.002, 0.015 + bottomEdge * 0.025, wallY));
       float rootAlpha = rootBand * bottomEdge * (0.45 + 0.55 * facing);
       float crown = pow(clamp(1.0 - distanceToEdge / max(width, 0.0001), 0.0, 1.0), mix(0.85, 0.35, cornerRadius));
       float bandVolume = edge * (0.88 + 0.12 * crown);
       float edgeAlpha = bandVolume * (1.0 - exp(-edgeBrightness * directionalGain * (0.65 + 0.2 * fresnel)));
       float bodyAlpha = 1.0 - (1.0 - centerOpacity) * (1.0 - 0.24 * resinTint);
-      float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha);
+      float fusionWidth = max(width * 1.3, 0.012 * wallShapeThickness);
+      float fusionBand = (1.0 - smoothstep(fusionWidth * 0.6, fusionWidth + aa, distanceToEdge))
+        * smoothstep(0.95, 0.998, wallY);
+      float fusionAlpha = clamp(topFusion * wallContact * fusionBand * (0.2 + 0.55 * facing), 0.0, 0.9);
+      float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha) * (1.0 - fusionAlpha);
       vec3 surfaceReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
       vec3 resinColor = mix(vec3(1.0), vec3(0.6, 0.91, 1.0), resinTint);
       outgoingLight = mix(resinColor, vec3(1.0), edgeAlpha)
-        + vec3(bandVolume * edgeBrightness * (0.12 + 0.18 * glint)) + surfaceReflection * sideGloss;
+        + vec3(bandVolume * edgeBrightness * (0.12 + 0.18 * glint)) + surfaceReflection * sideGloss
+        + fusionAlpha * (vec3(0.18 + 0.42 * glint) + surfaceReflection * 0.5);
       diffuseColor.a = coverage;
       #include <output_fragment>
     `);
   };
-  material.customProgramCacheKey = () => 'clear-molded-wall-v4';
+  material.customProgramCacheKey = () => 'clear-molded-wall-v5';
   material.extensions = { derivatives: true };
   return material;
 }
