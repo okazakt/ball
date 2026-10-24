@@ -73,23 +73,23 @@ test('L/T/cross junctions, closed loops and separate walls have no gaps or dupli
 });
 
 
-test('rounded plastic ribs remain valid at every grid placement', async () => {
+test('rounded transparent walls remain valid at every grid placement', async () => {
   const { solidGeometry, setRibFaces, ribMaterials } = await import('../src/case-visuals.js');
   for (let x = -400; x <= 400; x += 100) for (let z = -550; z <= 550; z += 100)
     for (const vertical of [false, true]) {
       const geometry = setRibFaces(solidGeometry([[x - 3.8, z - 3.8,
         x + (vertical ? 3.8 : 103.8), z + (vertical ? 103.8 : 3.8)]], 1,
-        { bevel: .012, fillet: .038 }));
+        { bevel: .0375, bevelOffset: -.0375, bevelSegments: 12, fillet: .038 }));
       checkBody(geometry);
       assert.equal(geometry.groups.length, 1);
       assert.ok(geometry.groups.every(group => group.count > 0));
       geometry.dispose();
     }
   const material = ribMaterials();
-  assert.equal(material.transmission, .85);
+  assert.equal(material.transmission, 1);
   assert.equal(material.ior, 1.25);
   assert.equal(material.thickness, 0.02);
-  assert.equal(material.roughness, .15);
+  assert.equal(material.roughness, 0);
   assert.equal(material.metalness, .1);
   assert.equal(material.opacity, 1);
   assert.equal(material.transparent, false);

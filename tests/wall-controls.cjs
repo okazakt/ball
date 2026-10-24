@@ -9,6 +9,9 @@ const fs = require('node:fs');
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
     await page.addInitScript(() => { window.requestAnimationFrame = () => 0; });
     await page.goto(process.env.TEST_URL || 'http://127.0.0.1:8000');
     await page.waitForFunction(() => window.__toukan?.game.ready, {}, { polling: 100 });
@@ -22,9 +25,9 @@ const fs = require('node:fs');
       g.loop(performance.now());
     });
     await page.locator('#wall-controls summary').click();
-    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 5);
+    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 6);
     for (const [key, min, max] of [['transmission', 0, 1], ['roughness', 0, .6],
-      ['ior', 1, 1.6], ['envMapIntensity', 0, 5], ['whiteness', 0, 1]]) {
+      ['ior', 1, 1.6], ['envMapIntensity', 0, 5], ['emissiveIntensity', 0, .5], ['topHighlight', 0, 3]]) {
       for (const value of [min, max]) {
         await page.locator(`#wall-${key}`).evaluate((input, value) => {
           input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -35,8 +38,8 @@ const fs = require('node:fs');
             if (m.userData.surface === 'walls' || g.doors.some(d => d.mesh === m)) {
               if (m.children.length || Array.isArray(m.material) || m.material.transparent || m.material.opacity !== 1)
                 throw Error('Wall is not a single transmission mesh');
-              if (key !== 'whiteness' && m.material[key] !== value) throw Error('Wall value mismatch');
-              if (key === 'whiteness' && m.material.color.getHex() !== (value ? 0xffffff : 0x99cfff))
+              if (key !== 'topHighlight' && m.material[key] !== value) throw Error('Wall value mismatch');
+              if (key === 'topHighlight' && m.material.userData.topHighlight.value !== value)
                 throw Error('Wall tint mismatch');
             }
           });
@@ -59,9 +62,9 @@ const fs = require('node:fs');
       const g = window.__toukan.game, settings = { ...g.wallSettings };
       g.load(structuredClone(g.stage));
       for (const material of g.wallMaterials)
-        for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity'])
+        for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity'])
           if (material[key] !== settings[key]) throw Error('Settings lost after reload');
-      for (const [key, value] of Object.entries({ transmission: .85, roughness: .15, ior: 1.25, envMapIntensity: 2, whiteness: .7 })) {
+      for (const [key, value] of Object.entries({ transmission: 1, roughness: 0, ior: 1.25, envMapIntensity: 2, emissiveIntensity: .15, topHighlight: 2 })) {
         const input = document.querySelector('#wall-' + key);
         input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
       }
@@ -72,6 +75,6 @@ const fs = require('node:fs');
     await page.screenshot({ path: '/workspace/ball-captures/sliders/panel.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.deepEqual(errors, []);
-    console.log('PASS: all five sliders, endpoints, wall/door/corner updates, reload, pointer and keyboard isolation');
+    console.log('PASS: all six sliders, endpoints, wall/door/corner updates, reload, pointer and keyboard isolation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

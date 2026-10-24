@@ -2,7 +2,7 @@ const T = window.THREE;
 
 // Union axis-aligned footprints before extrusion: no cell seams or internal
 // transparent faces, including at wall junctions and adjacent floor holes.
-export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}) {
+export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0, bevelOffset = 0, bevelSegments = 5 } = {}) {
   // All editor coordinates are decimal grid units. Canonicalize BEFORE union:
   // e.g. -100 + 103.8 and 0 + 3.8 must identify the same boundary.
   // Microscopic cells otherwise become concave spikes after bevel offsets.
@@ -93,7 +93,7 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
   });
   const geometry = new T.ExtrudeGeometry(shapes, {
     depth: height - bevel * 2, bevelEnabled: bevel > 0, bevelThickness: bevel,
-    bevelSize: bevel, bevelSegments: 5, curveSegments: fillet ? 8 : 1, steps: 1,
+    bevelSize: bevel, bevelOffset, bevelSegments, curveSegments: fillet ? 8 : 1, steps: 1,
   });
   geometry.rotateX(-Math.PI / 2);
   geometry.translate(0, bevel, 0);
@@ -127,14 +127,15 @@ export function ribGeometry(rectangles, height = 1) {
 }
 
 export const WALL_DEFAULTS = Object.freeze({
-  transmission: 0.85, roughness: 0.15, ior: 1.25, envMapIntensity: 2, whiteness: 0.7,
+  transmission: 1, roughness: 0, ior: 1.25, envMapIntensity: 2,
+  emissiveIntensity: 0.15, topHighlight: 2,
 });
 
 export function applyWallSettings(material, settings) {
   const wasTransmitting = material.transmission > 0;
-  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity'])
+  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity'])
     material[key] = settings[key];
-  material.color.setHex(0x99cfff).lerp(new T.Color(0xffffff), settings.whiteness);
+  material.userData.topHighlight.value = settings.topHighlight;
   // Transmission at zero changes shader defines; compile correctly at both ends.
   if (wasTransmitting !== (material.transmission > 0)) material.needsUpdate = true;
 }
@@ -142,8 +143,26 @@ export function applyWallSettings(material, settings) {
 export function ribMaterials(settings = WALL_DEFAULTS) {
   const material = new T.MeshPhysicalMaterial({
     thickness: 0.02, metalness: 0.1, transparent: false, opacity: 1,
+    color: 0xffffff, emissive: 0xffffff,
     depthWrite: true, clearcoat: 1, clearcoatRoughness: 0.03,
   });
+  material.userData.topHighlight = { value: settings.topHighlight };
+  // Change reflected light only on the curved roof; transmission stays intact.
+  material.onBeforeCompile = shader => {
+    shader.uniforms.wallTopHighlight = material.userData.topHighlight;
+    shader.vertexShader = 'varying float wallRoofWeight;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      wallRoofWeight = smoothstep(0.05, 0.65, normal.y);
+    `);
+    shader.fragmentShader = 'uniform float wallTopHighlight; varying float wallRoofWeight;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <output_fragment>', `
+      vec3 roofReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
+      outgoingLight = max(vec3(0.0), outgoingLight + roofReflection * (wallTopHighlight - 1.0) * wallRoofWeight);
+      #include <output_fragment>
+    `);
+  };
+  material.customProgramCacheKey = () => 'rounded-wall-roof-v1';
   applyWallSettings(material, settings);
   return material;
 }

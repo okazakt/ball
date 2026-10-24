@@ -94,7 +94,8 @@ for (const [key, title, min, max] of [
   ['roughness', '粗さ / roughness', 0, 0.6],
   ['ior', '屈折率 / ior', 1, 1.6],
   ['envMapIntensity', 'ツヤ / envMapIntensity', 0, 5],
-  ['whiteness', '白み / 青み → 白', 0, 1],
+  ['emissiveIntensity', '内部の明るさ / emissiveIntensity', 0, 0.5],
+  ['topHighlight', '天面ハイライト強度', 0, 3],
 ]) {
   const label = document.createElement('label');
   label.htmlFor = `wall-${key}`;
