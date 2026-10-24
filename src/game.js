@@ -38,6 +38,7 @@ export class Game {
       // Rebuild only after the thumb pauses, so the other controls stay fluid.
       this.wallGeometryTimer = setTimeout(() => this.refreshWallGeometry(), 80);
     }
+    this.renderScene();
   }
   refreshWallGeometry() {
     if (!this.board) return;
@@ -50,6 +51,7 @@ export class Game {
       mesh.material.userData.wallDistance.value = texture;
       mesh.material.userData.wallTexel.value.set(1 / texture.image.width, 1 / texture.image.height);
     });
+    this.renderScene();
   }
   async init() {
     const { default: R } = await import('../vendor/rapier.es.js');
@@ -1071,6 +1073,17 @@ export class Game {
       reflection.material.uniforms.tilt.value.set(this.tilt.z, -this.tilt.x);
     }
   }
+  renderScene() {
+    if (!this.renderer || !this.world || !this.stage) return;
+    this.setLighting();
+    this.renderer.clear();
+    // Three.js light layers select lights per camera, not per mesh. Render floors
+    // separately so upper-floor sunlight never illuminates an unreached dark floor.
+    for (let fi = this.stage.floors.length - 1; fi >= this.viewFloor; fi--) {
+      this.camera.layers.set(fi + 1);
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
   loop(now) {
     requestAnimationFrame((t) => this.loop(t));
     const dt = Math.min(0.1, (now - this.last) / 1000);
@@ -1099,14 +1112,7 @@ export class Game {
       r.mesh.material.dispose();
       return false;
     });
-    this.setLighting();
-    this.renderer.clear();
-    // Three.js light layers select lights per camera, not per mesh. Render floors
-    // separately so upper-floor sunlight never illuminates an unreached dark floor.
-    for (let fi = this.stage.floors.length - 1; fi >= this.viewFloor; fi--) {
-      this.camera.layers.set(fi + 1);
-      this.renderer.render(this.scene, this.camera);
-    }
+    this.renderScene();
     this.events.frame?.(this);
   }
   recordFrame() {

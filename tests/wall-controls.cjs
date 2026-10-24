@@ -36,7 +36,8 @@ const fs = require('node:fs');
       stage.floors[0].walls.push({ axis: 'v', x: 6, z: 8 });
       stage.floors[0].cells.push({ type: 'door', x: 2, z: 2 },
         ...[0, 1, 2, 3].map((rotation, x) => ({ type: 'corner', x, z: 4, rotation })));
-      g.load(stage); g.state = 'playing';
+      g.load(stage); g.state = 'ready';
+      g.renderer.setPixelRatio(2);
       document.querySelector('#start-panel').hidden = true;
       g.loop(performance.now());
       window.wallUnchanged = [];
@@ -47,8 +48,17 @@ const fs = require('node:fs');
     await page.locator('#wall-controls summary').click();
     assert.equal(await page.locator('#wall-controls input[type=range]').count(), 10);
     assert.equal(await page.locator('#wall-centerOpacity').inputValue(), '0.04');
+    const visualChanges = [];
     for (const [key, min, max] of [['edgeWidth', .05, .5], ['edgeBrightness', 0, 5],
       ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1], ['lightAngle', 0, 3.14], ['specularSharpness', 1, 20], ['resinTint', 0, 1]]) {
+      await page.evaluate(() => {
+        const g = window.__toukan.game;
+        g.tilt = { x: .35, z: -.35 };
+        g.updateWallSettings({ edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35,
+          centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2 });
+        window.wallPixels = null;
+      });
+      await page.waitForTimeout(150);
       for (const value of [min, max]) {
         const oldGeometry = key === 'cornerRadius' ? await page.evaluate(() => [...window.__toukan.game.wallMaterials].length && window.__toukan.game.floorGroups[0].children.find(m => m.userData.surface === 'walls').geometry.uuid) : null;
         await page.locator(`#wall-${key}`).evaluate((input, value) => {
@@ -61,18 +71,34 @@ const fs = require('node:fs');
               if (m.children.length || Array.isArray(m.material) || !m.material.transparent || m.material.depthWrite)
                 throw Error('Extra wall parts or opaque material remain');
               if (m.material.userData.wallUniforms[key].value !== value) throw Error('Uniform mismatch');
+              for (const shader of m.material.userData.wallShaders)
+                if (shader.uniforms[key] !== m.material.userData.wallUniforms[key]) throw Error('Compiled shader binding mismatch');
               if (!m.geometry.attributes.wallOutward || !m.material.alphaMap) throw Error('Molded wall data missing');
             }
           });
           for (const [m, geo, mat, color] of window.wallUnchanged)
             if (m.geometry.uuid !== geo || m.material.uuid !== mat || m.material.color.getHex() !== color)
               throw Error('Floor or frame changed');
-          g.loop(performance.now());
         }, { key, value });
         if (key === 'cornerRadius') await page.waitForFunction(old => window.__toukan.game.floorGroups[0].children.find(m => m.userData.surface === 'walls').geometry.uuid !== old, oldGeometry, { polling: 100 });
+        const change = await page.evaluate(() => {
+          const source = window.__toukan.game.renderer.domElement, copy = document.createElement('canvas');
+          copy.width = source.width; copy.height = source.height;
+          const ctx = copy.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(source, 0, 0);
+          const pixels = ctx.getImageData(0, 0, copy.width, copy.height).data;
+          let changed = 0;
+          if (window.wallPixels) for (let i = 0; i < pixels.length; i += 4)
+            if (Math.abs(pixels[i] - window.wallPixels[i]) + Math.abs(pixels[i + 1] - window.wallPixels[i + 1])
+              + Math.abs(pixels[i + 2] - window.wallPixels[i + 2]) > 3) changed++;
+          window.wallPixels = pixels;
+          return changed;
+        });
+        if (value === max) { visualChanges.push({ key, changedPixels: change }); assert.ok(change > 10, `${key} must change the framebuffer immediately`); }
         assert.equal(await page.locator(`output[for=wall-${key}]`).textContent(), value.toFixed(2));
       }
     }
+    console.log('Immediate slider pixel changes:', JSON.stringify(visualChanges));
     // Measure the actual game framebuffer, including its production shaders.
     const bands = await page.evaluate(() => {
       const g = window.__toukan.game;
@@ -125,6 +151,7 @@ const fs = require('node:fs');
     assert.ok(direction[1][1] > direction[0][1] + 25, 'Right rail must brighten when the light rotates');
     const slider = page.locator('#wall-edgeWidth');
     await slider.scrollIntoViewIfNeeded();
+    await page.evaluate(() => { window.__toukan.game.state = 'playing'; });
     const before = await page.evaluate(() => ({ ...window.__toukan.game.target }));
     const box = await slider.boundingBox();
     await page.mouse.move(box.x + 5, box.y + box.height / 2); await page.mouse.down();

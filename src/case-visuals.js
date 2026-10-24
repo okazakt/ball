@@ -237,7 +237,13 @@ export function prepareClearWall(geometry) {
 }
 
 export function applyWallSettings(material, settings) {
-  for (const key of Object.keys(WALL_DEFAULTS)) material.userData.wallUniforms[key].value = settings[key];
+  for (const key of Object.keys(WALL_DEFAULTS)) {
+    const uniform = material.userData.wallUniforms[key];
+    uniform.value = settings[key];
+    uniform.needsUpdate = true;
+    // Keep every compiled light/layer variant attached to the same live values.
+    for (const shader of material.userData.wallShaders) shader.uniforms[key] = uniform;
+  }
 }
 
 export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
@@ -248,6 +254,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
   });
   const uniforms = Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, { value }]));
   material.userData.wallUniforms = uniforms;
+  material.userData.wallShaders = new Set();
   // Store the distance field as a material texture so the existing disposal
   // lifecycle releases it on retries and stage changes.
   material.alphaMap = geometry ? prepareClearWall(geometry) : null;
@@ -255,6 +262,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
   material.userData.wallTexel = { value: new T.Vector2(
     1 / (material.alphaMap?.image.width || 1), 1 / (material.alphaMap?.image.height || 1)) };
   material.onBeforeCompile = shader => {
+    material.userData.wallShaders.add(shader);
     for (const key of Object.keys(WALL_DEFAULTS)) shader.uniforms[key] = uniforms[key];
     shader.uniforms.wallDistance = material.userData.wallDistance;
     shader.uniforms.wallTexel = material.userData.wallTexel;
@@ -271,7 +279,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       wallSide = 1.0 - abs(normal.y);
     `);
     shader.fragmentShader = `uniform sampler2D wallDistance; uniform vec2 wallTexel;
-      uniform float lightAngle; uniform float specularSharpness; uniform float resinTint;
+      uniform float lightAngle; uniform float specularSharpness; uniform float resinTint; uniform float cornerRadius;
       uniform float edgeWidth; uniform float edgeBrightness; uniform float sideGloss; uniform float bottomEdge; uniform float centerOpacity;
       varying vec2 wallUV; varying vec2 wallDir; varying float wallY; varying float wallSide;\n` + shader.fragmentShader;
     // Alpha is determined by reflection coverage, never by diffuse illumination.
@@ -284,13 +292,16 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       vec2 outward = length(gradient) > 0.0001 ? normalize(gradient) : normalize(wallDir + vec2(0.00001));
       vec2 lightDirection = vec2(-cos(lightAngle), -sin(lightAngle));
       float facing = clamp(0.5 + 0.5 * dot(outward, lightDirection), 0.0, 1.0);
-      float directionalGain = 0.06 + 0.2 * facing + 1.2 * pow(facing, specularSharpness);
+      // Broad reflected volume remains visible even on the shaded rail.
+      // The directional lobe adds a glint instead of erasing the whole band.
+      float glint = pow(facing, specularSharpness * 0.75);
+      float directionalGain = 0.55 + 0.3 * facing + 0.85 * glint;
       float aa = max(fwidth(distanceToEdge), 0.0006);
       // Each band occupies this fraction of the top face; the backlit edge
       // fades more softly while the lit edge follows the sharpness control.
       float width = edgeWidth * 0.068;
-      float softness = mix(0.7, 0.06, (specularSharpness - 1.0) / 19.0);
-      float feather = width * mix(0.85, softness, facing);
+      float softness = mix(0.35, 0.06, (specularSharpness - 1.0) / 19.0);
+      float feather = width * mix(0.38, softness, facing);
       float edge = (1.0 - smoothstep(width - feather - aa, width + aa, distanceToEdge))
         * smoothstep(0.97, 0.998, wallY) * step(0.001, edgeWidth);
       float fresnel = pow(1.0 - clamp(abs(dot(normal, geometry.viewDir)), 0.0, 1.0), 3.0);
@@ -299,18 +310,20 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       float glare = clamp(sideGloss * wallSide * verticalGloss * (0.12 + 0.3 * fresnel) * (0.3 + 0.7 * facing), 0.0, 0.9);
       float rootBand = wallSide * (1.0 - smoothstep(0.002, 0.015 + bottomEdge * 0.025, wallY));
       float rootAlpha = rootBand * bottomEdge * (0.45 + 0.55 * facing);
-      float edgeAlpha = clamp(edge * edgeBrightness * directionalGain * (0.48 + 0.25 * fresnel), 0.0, 1.0);
-      float bodyAlpha = 1.0 - (1.0 - centerOpacity) * (1.0 - 0.1 * resinTint);
+      float crown = pow(clamp(1.0 - distanceToEdge / max(width, 0.0001), 0.0, 1.0), mix(0.85, 0.35, cornerRadius));
+      float bandVolume = edge * (0.88 + 0.12 * crown);
+      float edgeAlpha = bandVolume * (1.0 - exp(-edgeBrightness * directionalGain * (0.65 + 0.2 * fresnel)));
+      float bodyAlpha = 1.0 - (1.0 - centerOpacity) * (1.0 - 0.24 * resinTint);
       float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha);
       vec3 surfaceReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
-      vec3 resinColor = mix(vec3(1.0), vec3(0.82, 0.96, 1.0), resinTint);
+      vec3 resinColor = mix(vec3(1.0), vec3(0.6, 0.91, 1.0), resinTint);
       outgoingLight = mix(resinColor, vec3(1.0), edgeAlpha)
-        + vec3(edge * edgeBrightness * directionalGain * 0.15) + surfaceReflection * sideGloss;
+        + vec3(bandVolume * edgeBrightness * (0.12 + 0.18 * glint)) + surfaceReflection * sideGloss;
       diffuseColor.a = coverage;
       #include <output_fragment>
     `);
   };
-  material.customProgramCacheKey = () => 'clear-molded-wall-v3';
+  material.customProgramCacheKey = () => 'clear-molded-wall-v4';
   material.extensions = { derivatives: true };
   return material;
 }
