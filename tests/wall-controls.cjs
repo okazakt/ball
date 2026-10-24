@@ -11,6 +11,7 @@ const fs = require('node:fs');
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     await page.addInitScript(() => { window.requestAnimationFrame = () => 0; });
+    console.log('Loading wall-controls fixture');
     await page.goto(process.env.TEST_URL || 'http://127.0.0.1:8000');
     await page.waitForFunction(() => window.__toukan?.game.ready, {}, { polling: 100 });
     await page.evaluate(async () => {
@@ -46,16 +47,18 @@ const fs = require('node:fs');
           window.wallUnchanged.push([m, m.geometry.uuid, m.material.uuid, m.material.color.getHex()]);
     });
     await page.locator('#wall-controls summary').click();
-    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 12);
+    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 14);
     assert.equal(await page.locator('#wall-centerOpacity').inputValue(), '0.04');
+    console.log('Wall-controls fixture ready');
     const visualChanges = [];
     for (const [key, min, max] of [['edgeWidth', .05, .5], ['edgeBrightness', 0, 5],
-      ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1], ['lightAngle', 0, 3.14], ['specularSharpness', 1, 20], ['resinTint', 0, 1], ['topFusion', 0, 1], ['wallThickness', .5, 2]]) {
+      ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1], ['lightAngle', 0, 3.14], ['specularSharpness', 1, 20], ['resinTint', 0, 1], ['topFusion', 0, 1], ['wallThickness', .5, 2], ['bottomFusion', 0, 1], ['resinDensity', 0, 1]]) {
+      console.log('Checking slider:', key);
       await page.evaluate(() => {
         const g = window.__toukan.game;
         g.tilt = { x: .35, z: -.35 };
         g.updateWallSettings({ edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35,
-          centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2, topFusion: .4, wallThickness: 1 });
+          centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2, topFusion: .4, wallThickness: 1, bottomFusion: .4, resinDensity: .5 });
         window.wallPixels = null;
       });
       await page.waitForTimeout(150);
@@ -128,6 +131,7 @@ const fs = require('node:fs');
       g.renderScene();
       if (mesh.material.userData.wallContact.value < .99) throw Error('Closed door must meet lid underside');
       mesh.position.y += .3; g.renderScene();
+      if (mesh.material.userData.wallBottomContact.value !== 0) throw Error('Raised door must lose floor fusion');
       if (mesh.material.userData.wallContact.value !== 0) throw Error('Open door must lose fusion reflection');
       mesh.position.y = y; g.renderScene();
     });
@@ -135,7 +139,7 @@ const fs = require('node:fs');
     const bands = await page.evaluate(() => {
       const g = window.__toukan.game;
       g.tilt = { x: 0, z: 0 }; g.setLighting();
-      g.updateWallSettings({ sideGloss: 0, bottomEdge: 0, centerOpacity: 0, edgeBrightness: 3, resinTint: 0, topFusion: 0, lightAngle: .78, specularSharpness: 8 });
+      g.updateWallSettings({ sideGloss: 0, bottomEdge: 0, centerOpacity: 0, edgeBrightness: 3, resinTint: 0, topFusion: 0, bottomFusion: 0, resinDensity: 0, lightAngle: .78, specularSharpness: 8 });
       const copy = document.createElement('canvas');
       copy.width = g.renderer.domElement.width; copy.height = g.renderer.domElement.height;
       const ctx = copy.getContext('2d', { willReadFrequently: true }), result = [];
@@ -158,7 +162,7 @@ const fs = require('node:fs');
       const g = window.__toukan.game, T = window.THREE, ratio = g.renderer.getPixelRatio();
       g.renderer.setPixelRatio(3);
       g.updateWallSettings({ edgeWidth: .25, edgeBrightness: 3, specularSharpness: 8,
-        sideGloss: 0, bottomEdge: 0, centerOpacity: 0, resinTint: 0, topFusion: 0, taperAngle: 0 });
+        sideGloss: 0, bottomEdge: 0, centerOpacity: 0, resinTint: 0, topFusion: 0, bottomFusion: 0, resinDensity: 0, taperAngle: 0 });
       const copy = document.createElement('canvas');
       copy.width = g.renderer.domElement.width; copy.height = g.renderer.domElement.height;
       const ctx = copy.getContext('2d', { willReadFrequently: true });
@@ -198,7 +202,7 @@ const fs = require('node:fs');
       g.load(structuredClone(g.stage));
       for (const m of g.wallMaterials) for (const key of Object.keys(settings))
         if (m.userData.wallUniforms[key].value !== settings[key]) throw Error('Settings lost on reload');
-      g.updateWallSettings({ edgeBrightness: 0, sideGloss: 0, bottomEdge: 0, centerOpacity: 0, resinTint: 0, topFusion: 0 });
+      g.updateWallSettings({ edgeBrightness: 0, sideGloss: 0, bottomEdge: 0, centerOpacity: 0, resinTint: 0, topFusion: 0, bottomFusion: 0, resinDensity: 0 });
       g.setLighting(); g.camera.updateMatrixWorld(true);
       const render = () => { g.renderer.clear(); g.renderer.render(g.scene, g.camera); return g.renderer.domElement.toDataURL(); };
       const clear = render(), wallMeshes = [];
@@ -207,7 +211,7 @@ const fs = require('node:fs');
       });
       if (render() !== clear) throw Error('Clear wall changes the background');
       wallMeshes.forEach(m => m.visible = true);
-      const defaults = { edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35, centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2, topFusion: .4, wallThickness: 1 };
+      const defaults = { edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35, centerOpacity: .04, taperAngle: .35, cornerRadius: .5, lightAngle: .78, specularSharpness: 8, resinTint: .2, topFusion: .4, wallThickness: 1, bottomFusion: .4, resinDensity: .5 };
       for (const [key, value] of Object.entries(defaults)) {
         const input = document.querySelector('#wall-' + key); input.value = value;
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -223,6 +227,6 @@ const fs = require('node:fs');
     await page.screenshot({ path: '/workspace/ball-captures/clear-molded/tilted.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.deepEqual(errors, []);
-    console.log('PASS: twelve sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
+    console.log('PASS: fourteen sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

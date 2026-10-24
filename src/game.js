@@ -172,6 +172,7 @@ export class Game {
     m.layers.set(f + 1);
     if (isWall) m.onBeforeRender = () => {
       const top = m.position.y + m.geometry.boundingBox.max.y;
+      m.material.userData.wallBottomContact.value = clamp(1 - Math.abs(m.position.y + m.geometry.boundingBox.min.y + f * GAP) / 0.07, 0, 1);
       // The lid's underside is at floor + 1. Opening doors lose the weld glow.
       m.material.userData.wallContact.value = clamp(1 - Math.abs(top - (-f * GAP + 1)) / 0.07, 0, 1);
     };
@@ -1107,10 +1108,34 @@ export class Game {
     if (!this.renderer || !this.world || !this.stage) return;
     this.setLighting();
     this.renderer.clear();
+    // Capture the unchanged scene without wall surfaces for internal scattering.
+    if (!this.wallBackgroundTarget) this.wallBackgroundTarget = new T.WebGLRenderTarget(1, 1, { type: T.HalfFloatType });
+    const size = this.renderer.getDrawingBufferSize(new T.Vector2());
+    if (this.wallBackgroundTarget.width !== size.x || this.wallBackgroundTarget.height !== size.y)
+      this.wallBackgroundTarget.setSize(size.x, size.y);
+    const hidden = [];
+    this.board.traverse(mesh => {
+      if (mesh.isMesh && this.wallMaterials.has(mesh.material) && mesh.visible) hidden.push(mesh);
+    });
     // Three.js light layers select lights per camera, not per mesh. Render floors
     // separately so upper-floor sunlight never illuminates an unreached dark floor.
     for (let fi = this.stage.floors.length - 1; fi >= this.viewFloor; fi--) {
       this.camera.layers.set(fi + 1);
+      if (this.wallSettings.resinDensity > 0) {
+        for (const mesh of hidden) mesh.visible = false;
+        this.renderer.setRenderTarget(this.wallBackgroundTarget);
+        if (fi === this.stage.floors.length - 1) this.renderer.clear();
+        const toneMapping = this.renderer.toneMapping;
+        this.renderer.toneMapping = T.NoToneMapping;
+        this.renderer.render(this.scene, this.camera);
+        this.renderer.toneMapping = toneMapping;
+        this.renderer.setRenderTarget(null);
+        for (const mesh of hidden) mesh.visible = true;
+      }
+      for (const material of this.wallMaterials) {
+        material.userData.wallBackground.value = this.wallBackgroundTarget.texture;
+        material.userData.wallResolution.value.copy(size);
+      }
       this.renderer.render(this.scene, this.camera);
     }
   }

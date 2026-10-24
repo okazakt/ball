@@ -101,6 +101,8 @@ for (const [key, title, min, max] of [
   ['specularSharpness', '光の鋭さ / specularSharpness', 1, 20],
   ['resinTint', '樹脂の色味・ミルク感 / resinTint', 0, 1],
   ['topFusion', '天井との結合部 / topFusion', 0, 1],
+  ['bottomFusion', '床との接着・結合部 / bottomFusion', 0, 1],
+  ['resinDensity', '樹脂の内部密度 / resinDensity', 0, 1],
   ['wallThickness', '壁の厚み・ボリューム / wallThickness', 0.5, 2],
 ]) {
   const label = document.createElement('label');

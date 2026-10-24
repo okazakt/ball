@@ -117,7 +117,7 @@ test('rounded transparent walls remain valid at every grid placement', async () 
   assert.equal(material.depthWrite, false);
   assert.equal(material.transparent, true);
   assert.equal(material.userData.wallUniforms.centerOpacity.value, .04);
-  assert.equal(Object.keys(material.userData.wallUniforms).length, 12);
+  assert.equal(Object.keys(material.userData.wallUniforms).length, 14);
   material.dispose();
 });
 

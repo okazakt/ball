@@ -136,7 +136,7 @@ export const WALL_DEFAULTS = Object.freeze({
   edgeWidth: 0.25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: 0.35,
   centerOpacity: 0.04, taperAngle: 0.35, cornerRadius: 0.5,
   lightAngle: 0.78, specularSharpness: 8, resinTint: 0.2,
-  topFusion: 0.4, wallThickness: 1,
+  topFusion: 0.4, wallThickness: 1, bottomFusion: 0.4, resinDensity: 0.5,
 });
 
 // A single united extrusion preserves the rounded outline at all junctions.
@@ -271,6 +271,9 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
   material.userData.wallDistance = { value: material.alphaMap };
   material.userData.wallShapeThickness = { value: geometry?.userData.wallThickness ?? settings.wallThickness };
   material.userData.wallContact = { value: 1 };
+  material.userData.wallBottomContact = { value: 1 };
+  material.userData.wallBackground = { value: null };
+  material.userData.wallResolution = { value: new T.Vector2(1, 1) };
   material.userData.wallTexel = { value: new T.Vector2(
     1 / (material.alphaMap?.image.width || 1), 1 / (material.alphaMap?.image.height || 1)) };
   material.onBeforeCompile = shader => {
@@ -280,6 +283,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
     shader.uniforms.wallTexel = material.userData.wallTexel;
     shader.uniforms.wallShapeThickness = material.userData.wallShapeThickness;
     shader.uniforms.wallContact = material.userData.wallContact;
+    for (const key of ['wallBottomContact', 'wallBackground', 'wallResolution']) shader.uniforms[key] = material.userData[key];
     shader.vertexShader = `attribute vec2 wallPlanar; attribute vec2 wallOutward; attribute float wallHeight;
       uniform float taperAngle; uniform float wallThickness; uniform float wallShapeThickness; varying vec2 wallUV; varying vec2 wallDir; varying float wallY; varying float wallSide;\n` + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `
@@ -295,6 +299,8 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       wallSide = 1.0 - abs(normal.y);
     `);
     shader.fragmentShader = `uniform sampler2D wallDistance; uniform vec2 wallTexel;
+      uniform sampler2D wallBackground; uniform vec2 wallResolution;
+      uniform float bottomFusion; uniform float resinDensity; uniform float wallBottomContact;
       uniform float lightAngle; uniform float specularSharpness; uniform float resinTint; uniform float cornerRadius;
       uniform float topFusion; uniform float wallThickness; uniform float wallShapeThickness; uniform float wallContact;
       uniform float edgeWidth; uniform float edgeBrightness; uniform float sideGloss; uniform float bottomEdge; uniform float centerOpacity;
@@ -330,22 +336,43 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       float crown = pow(clamp(1.0 - distanceToEdge / max(width, 0.0001), 0.0, 1.0), mix(0.85, 0.35, cornerRadius));
       float bandVolume = edge * (0.88 + 0.12 * crown);
       float edgeAlpha = bandVolume * (1.0 - exp(-edgeBrightness * directionalGain * (0.65 + 0.2 * fresnel)));
-      float bodyAlpha = 1.0 - (1.0 - centerOpacity) * (1.0 - 0.24 * resinTint);
+      // Beer-Lambert style path attenuation, independent of tint and reflections.
+      float density = 1.0 - exp(-resinDensity * wallThickness * (0.8 + 0.6 * wallSide));
+      float bodyAlpha = 1.0 - (1.0 - centerOpacity) * (1.0 - 0.24 * resinTint) * (1.0 - density * 0.48);
       float fusionWidth = max(width * 1.3, 0.012 * wallShapeThickness);
       float fusionBand = (1.0 - smoothstep(fusionWidth * 0.6, fusionWidth + aa, distanceToEdge))
         * smoothstep(0.95, 0.998, wallY);
       float fusionAlpha = clamp(topFusion * wallContact * fusionBand * (0.2 + 0.55 * facing), 0.0, 0.9);
-      float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha) * (1.0 - fusionAlpha);
+      float bottomBand = wallSide * (1.0 - smoothstep(0.008, 0.065 + bottomFusion * 0.035, wallY));
+      float bottomAlpha = clamp(bottomFusion * wallBottomContact * bottomBand * (0.3 + 0.55 * facing), 0.0, 0.9);
+      float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha) * (1.0 - fusionAlpha) * (1.0 - bottomAlpha);
       vec3 surfaceReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
       vec3 resinColor = mix(vec3(1.0), vec3(0.6, 0.91, 1.0), resinTint);
       outgoingLight = mix(resinColor, vec3(1.0), edgeAlpha)
         + vec3(bandVolume * edgeBrightness * (0.12 + 0.18 * glint)) + surfaceReflection * sideGloss
         + fusionAlpha * (vec3(0.18 + 0.42 * glint) + surfaceReflection * 0.5);
-      diffuseColor.a = coverage;
+      // Nine screen-space samples diffuse the actual floor/balls, without refraction offset.
+      vec2 screenUV = gl_FragCoord.xy / wallResolution;
+      float radius = resinDensity * (2.0 + 8.0 * resinDensity) * sqrt(wallThickness);
+      vec2 spread = vec2(radius) / wallResolution;
+      vec3 blurred = texture2D(wallBackground, screenUV).rgb * 0.25;
+      blurred += (texture2D(wallBackground, screenUV + vec2(spread.x, 0.0)).rgb
+        + texture2D(wallBackground, screenUV - vec2(spread.x, 0.0)).rgb
+        + texture2D(wallBackground, screenUV + vec2(0.0, spread.y)).rgb
+        + texture2D(wallBackground, screenUV - vec2(0.0, spread.y)).rgb) * 0.125;
+      blurred += (texture2D(wallBackground, screenUV + spread).rgb
+        + texture2D(wallBackground, screenUV - spread).rgb
+        + texture2D(wallBackground, screenUV + spread * vec2(1.0, -1.0)).rgb
+        + texture2D(wallBackground, screenUV + spread * vec2(-1.0, 1.0)).rgb) * 0.0625;
+      float scattering = density * 0.75;
+      float finalCoverage = coverage + (1.0 - coverage) * scattering;
+      outgoingLight = (outgoingLight * coverage + blurred * scattering * (1.0 - coverage)) / max(finalCoverage, 0.00001)
+        + bottomAlpha * vec3(0.2 + 0.35 * glint);
+      diffuseColor.a = finalCoverage;
       #include <output_fragment>
     `);
   };
-  material.customProgramCacheKey = () => 'clear-molded-wall-v5';
+  material.customProgramCacheKey = () => 'clear-molded-wall-v6';
   material.extensions = { derivatives: true };
   return material;
 }
