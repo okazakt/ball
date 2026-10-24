@@ -121,6 +121,10 @@ export class Game {
     });
   }
   mesh(geo, mat, x, y, z, f = 0, parent = this.board) {
+    if (mat.isWallTemplate) {
+      mat = ribMaterials(this.wallSettings, geo);
+      this.wallMaterials.add(mat);
+    }
     const m = new T.Mesh(geo, mat);
     m.position.set(x, y, z);
     m.castShadow = true;
@@ -154,6 +158,7 @@ export class Game {
         n.geometry?.dispose();
         if (n.material) for (const material of Array.isArray(n.material) ? n.material : [n.material]) {
           material.map?.dispose();
+          material.alphaMap?.dispose();
           material.dispose();
         }
       });
@@ -204,8 +209,7 @@ export class Game {
       this.board.add(group);
       this.floorGroups.push(group);
       const start = this.board.children.length;
-      const wall = ribMaterials(this.wallSettings);
-      this.wallMaterials.add(wall);
+      const wall = { isWallTemplate: true };
       const floorRects = [];
       for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
         if (f.cells.some(c => c.x === x && c.z === z && c.type === 'hole')) continue;
@@ -232,7 +236,7 @@ export class Game {
         return [x - 3.8, z - 3.8, x + (w.axis === 'h' ? 103.8 : 3.8), z + (w.axis === 'v' ? 103.8 : 3.8)];
       });
       if (wallRects.length) {
-        const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.0375, bevelOffset: -0.0375, bevelSegments: 12, fillet: 0.038 })), wall, 0, y, 0, fi);
+        const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.004, bevelOffset: -0.004, bevelSegments: 5, fillet: 0.038 })), wall, 0, y, 0, fi);
         walls.castShadow = false;
         walls.userData.surface = 'walls';
       }
@@ -380,7 +384,7 @@ export class Game {
           );
           const halfX = vertical ? 3.8 : 48.8, halfZ = vertical ? 48.8 : 3.8;
           const doorGeometry = solidGeometry([[-halfX, -halfZ, halfX, halfZ]], 1,
-            { bevel: 0.0375, bevelOffset: -0.0375, bevelSegments: 12, fillet: 0.038 });
+            { bevel: 0.004, bevelOffset: -0.004, bevelSegments: 5, fillet: 0.038 });
           doorGeometry.translate(0, -0.5, 0);
           const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
           mesh.castShadow = false;
@@ -394,10 +398,10 @@ export class Game {
           shape.absarc(0, 0, 0.342, -Math.PI / 2, 0, false);
           shape.absarc(0.38, 0, 0.038, Math.PI, 0, true);
           shape.closePath();
-          const geometry = new T.ExtrudeGeometry(shape, { depth: 0.925, bevelEnabled: true, bevelThickness: 0.0375, bevelSize: 0.0375, bevelOffset: -0.0375, bevelSegments: 12, curveSegments: 24 });
+          const geometry = new T.ExtrudeGeometry(shape, { depth: 0.992, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelOffset: -0.004, bevelSegments: 5, curveSegments: 24 });
           geometry.rotateX(-Math.PI / 2);
           geometry.rotateY(-((c.rotation || 0) * Math.PI) / 2);
-          geometry.translate(0, 0.0375, 0);
+          geometry.translate(0, 0.004, 0);
           smoothMoldedNormals(geometry);
           setRibFaces(geometry);
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);

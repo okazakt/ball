@@ -90,15 +90,11 @@ wallPanel.append(wallSummary);
 const wallFields = document.createElement('div');
 wallFields.className = 'wall-fields';
 for (const [key, title, min, max] of [
-  ['transmission', '透過率 / transmission', 0, 1],
-  ['roughness', '粗さ / roughness', 0, 0.6],
-  ['ior', '屈折率 / ior', 1, 1.6],
-  ['envMapIntensity', 'ツヤ / envMapIntensity', 0, 5],
-  ['clearcoat', 'コーティング強度 / clearcoat', 0, 1],
-  ['clearcoatRoughness', 'コートの粗さ / clearcoatRoughness', 0, 0.5],
-  ['attenuationDistance', '内部減衰 / attenuationDistance', 0.01, 5],
-  ['specularIntensity', '鏡面反射 / specularIntensity', 0, 2],
-  ['metalness', '金属感 / metalness', 0, 0.3],
+  ['edgeWidth', '両フチの太さ / edgeWidth', 0, 2],
+  ['edgeBrightness', '両フチの輝度 / edgeBrightness', 0, 5],
+  ['sideGloss', '側面のツヤ / sideGloss', 0, 3],
+  ['centerOpacity', '中央の不透明度 / centerOpacity', 0, 0.5],
+  ['taperAngle', '抜き勾配 / taperAngle', 0, 1],
 ]) {
   const label = document.createElement('label');
   label.htmlFor = `wall-${key}`;

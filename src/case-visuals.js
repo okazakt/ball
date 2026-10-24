@@ -127,26 +127,128 @@ export function ribGeometry(rectangles, height = 1) {
 }
 
 export const WALL_DEFAULTS = Object.freeze({
-  transmission: 0.88, roughness: 0.12, ior: 1.5, envMapIntensity: 3,
-  clearcoat: 1, clearcoatRoughness: 0.05, attenuationDistance: 0.5,
-  specularIntensity: 1, metalness: 0,
+  edgeWidth: 1, edgeBrightness: 2.5, sideGloss: 1, centerOpacity: 0.02, taperAngle: 0.5,
 });
 
-export function applyWallSettings(material, settings) {
-  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity',
-    'clearcoat', 'clearcoatRoughness', 'attenuationDistance', 'specularIntensity', 'metalness'])
-    material[key] = settings[key];
+// Bake distance to the OUTER boundary of the united top footprint. Internal
+// triangulation edges never enter this field, so L/T/cross joins have no rails.
+export function prepareClearWall(geometry) {
+  geometry.computeBoundingBox();
+  const { min, max } = geometry.boundingBox;
+  const padding = 0.02, spanX = max.x - min.x + padding * 2, spanZ = max.z - min.z + padding * 2;
+  const scale = 1536 / Math.max(spanX, spanZ, 1);
+  const width = Math.max(32, Math.ceil(spanX * scale)), height = Math.max(32, Math.ceil(spanZ * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff';
+  const p = geometry.attributes.position, normals = geometry.attributes.normal;
+  const uv = new Float32Array(p.count * 2), heights = new Float32Array(p.count);
+  const px = x => (x - min.x + padding) / spanX * width;
+  const pz = z => (z - min.z + padding) / spanZ * height;
+  for (let i = 0; i < p.count; i++) {
+    uv[i * 2] = px(p.getX(i)) / width; uv[i * 2 + 1] = pz(p.getZ(i)) / height;
+    heights[i] = (p.getY(i) - min.y) / (max.y - min.y);
+  }
+  ctx.beginPath();
+  for (let i = 0; i < p.count; i += 3) {
+    if (![0, 1, 2].every(j => Math.abs(p.getY(i + j) - max.y) < 1e-5)) continue;
+    ctx.moveTo(px(p.getX(i)), pz(p.getZ(i)));
+    for (const j of [1, 2]) ctx.lineTo(px(p.getX(i + j)), pz(p.getZ(i + j)));
+    ctx.closePath();
+  }
+  // One fill avoids antialiased cracks between neighboring cap triangles.
+  ctx.fill();
+  const mask = ctx.getImageData(0, 0, width, height).data;
+  const distance = new Float32Array(width * height), diagonal = Math.SQRT2;
+  for (let i = 0; i < distance.length; i++) distance[i] = mask[i * 4 + 3] > 127 ? 1e5 : 0;
+  for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+    const i = y * width + x;
+    distance[i] = Math.min(distance[i], distance[i - 1] + 1, distance[i - width] + 1,
+      distance[i - width - 1] + diagonal, distance[i - width + 1] + diagonal);
+  }
+  for (let y = height - 2; y > 0; y--) for (let x = width - 2; x > 0; x--) {
+    const i = y * width + x;
+    distance[i] = Math.min(distance[i], distance[i + 1] + 1, distance[i + width] + 1,
+      distance[i + width + 1] + diagonal, distance[i + width - 1] + diagonal);
+  }
+  const rgba = new Uint8Array(width * height * 4), worldPixel = Math.min(spanX / width, spanZ / height);
+  for (let i = 0; i < distance.length; i++) {
+    rgba[i * 4] = Math.min(255, Math.round(distance[i] * worldPixel / 0.06 * 255));
+    rgba[i * 4 + 3] = 255;
+  }
+  const outward = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const x = Math.max(1, Math.min(width - 2, Math.round(uv[i * 2] * width)));
+    const y = Math.max(1, Math.min(height - 2, Math.round(uv[i * 2 + 1] * height)));
+    const at = y * width + x;
+    let nx = distance[at - 1] - distance[at + 1], nz = distance[at - width] - distance[at + width];
+    if (Math.hypot(nx, nz) < 1e-5) { nx = normals.getX(i); nz = normals.getZ(i); }
+    const length = Math.hypot(nx, nz) || 1;
+    outward[i * 2] = nx / length; outward[i * 2 + 1] = nz / length;
+  }
+  geometry.setAttribute('wallPlanar', new T.BufferAttribute(uv, 2));
+  geometry.setAttribute('wallHeight', new T.BufferAttribute(heights, 1));
+  geometry.setAttribute('wallOutward', new T.BufferAttribute(outward, 2));
+  const texture = new T.DataTexture(rgba, width, height, T.RGBAFormat);
+  texture.minFilter = texture.magFilter = T.LinearFilter;
+  texture.generateMipmaps = false; texture.needsUpdate = true;
+  return texture;
 }
 
-export function ribMaterials(settings = WALL_DEFAULTS) {
+export function applyWallSettings(material, settings) {
+  for (const key of Object.keys(WALL_DEFAULTS)) material.userData.wallUniforms[key].value = settings[key];
+}
+
+export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
   const material = new T.MeshPhysicalMaterial({
-    thickness: 0.5, transparent: false, opacity: 1,
-    color: 0xffffff, emissiveIntensity: 0,
-    // Pure white attenuation has no effect at any distance. A subtle blue tint
-    // lets the distance control absorption without changing alpha or roughness.
-    attenuationColor: 0xe8f4ff, depthWrite: true,
+    color: 0xffffff, transparent: true, opacity: 1, depthWrite: false,
+    transmission: 0, roughness: 0.06, metalness: 0, ior: 1.5,
+    clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 3,
   });
-  applyWallSettings(material, settings);
+  const uniforms = Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, { value }]));
+  material.userData.wallUniforms = uniforms;
+  // Store the distance field as a material texture so the existing disposal
+  // lifecycle releases it on retries and stage changes.
+  material.alphaMap = geometry ? prepareClearWall(geometry) : null;
+  material.onBeforeCompile = shader => {
+    for (const key of Object.keys(WALL_DEFAULTS)) shader.uniforms[key] = uniforms[key];
+    shader.uniforms.wallDistance = { value: material.alphaMap };
+    shader.vertexShader = `attribute vec2 wallPlanar; attribute vec2 wallOutward; attribute float wallHeight;
+      uniform float taperAngle; varying vec2 wallUV; varying float wallY; varying float wallSide;\n` + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `
+      #include <beginnormal_vertex>
+      objectNormal.y += length(objectNormal.xz) * taperAngle * 0.0038;
+      objectNormal = normalize(objectNormal);
+    `).replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      transformed.xz -= wallOutward * taperAngle * 0.0038 * wallHeight;
+      wallUV = wallPlanar; wallY = wallHeight;
+      wallSide = 1.0 - abs(normal.y);
+    `);
+    shader.fragmentShader = `uniform sampler2D wallDistance;
+      uniform float edgeWidth; uniform float edgeBrightness; uniform float sideGloss; uniform float centerOpacity;
+      varying vec2 wallUV; varying float wallY; varying float wallSide;\n` + shader.fragmentShader;
+    // Alpha is determined by reflection coverage, never by diffuse illumination.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <alphamap_fragment>', '');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <output_fragment>', `
+      float distanceToEdge = texture2D(wallDistance, wallUV).r * 0.06;
+      float aa = max(fwidth(distanceToEdge), 0.0006);
+      float width = edgeWidth * 0.006;
+      float edge = (1.0 - smoothstep(width - aa, width + aa, distanceToEdge))
+        * smoothstep(0.97, 0.998, wallY) * step(0.001, edgeWidth);
+      float fresnel = pow(1.0 - clamp(abs(dot(normal, geometry.viewDir)), 0.0, 1.0), 3.0);
+      float glare = clamp(sideGloss * wallSide * (0.05 + 0.28 * fresnel), 0.0, 0.9);
+      float edgeAlpha = clamp(edge * edgeBrightness * (0.48 + 0.25 * fresnel), 0.0, 1.0);
+      float coverage = 1.0 - (1.0 - centerOpacity) * (1.0 - glare) * (1.0 - edgeAlpha);
+      vec3 surfaceReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
+      outgoingLight = vec3(1.0 + edge * edgeBrightness * 0.15) + surfaceReflection * sideGloss;
+      diffuseColor.a = coverage;
+      #include <output_fragment>
+    `);
+  };
+  material.customProgramCacheKey = () => 'clear-molded-wall-v1';
+  material.extensions = { derivatives: true };
   return material;
 }
 

@@ -8,7 +8,7 @@ globalThis.window={THREE:context.THREE};
 const {solidGeometry}=await import('../src/case-visuals.js');
 const rect=(x,z,vertical)=>[x*100-3.8,z*100-3.8,x*100+(vertical?3.8:103.8),z*100+(vertical?103.8:3.8)];
 function validate(rects) {
-  const g=solidGeometry(rects,1,{bevel:.0375,bevelOffset:-.0375,bevelSegments:12,fillet:.038});
+  const g=solidGeometry(rects,1,{bevel:.004,bevelOffset:-.004,bevelSegments:5,fillet:.038});
   const p=g.attributes.position,n=g.attributes.normal;
   assert.ok([...p.array,...n.array].every(Number.isFinite));
   const minX=Math.min(...rects.map(r=>r[0]))/100-.014;
@@ -38,8 +38,8 @@ function validate(rects) {
   }
   g.dispose();mesh.material.dispose();
 }
-test('rounded connected U shape preserves every segment at decimal boundaries',()=>{
+test('united rounded U shape preserves every segment at decimal boundaries',()=>{
   validate([rect(-1,-5,true),rect(-1,-4,false),rect(0,-4,true)]);
 });
 
-test('round roofs at L/T/cross junctions',()=>{for(let mask=1;mask<16;mask++){const arms=[rect(-1,0,false),rect(0,0,false),rect(0,-1,true),rect(0,0,true)];validate(arms.filter((_,i)=>mask&(1<<i)));}});
+test('clear molded walls at L/T/cross junctions',()=>{for(let mask=1;mask<16;mask++){const arms=[rect(-1,0,false),rect(0,0,false),rect(0,-1,true),rect(0,0,true)];validate(arms.filter((_,i)=>mask&(1<<i)));}});

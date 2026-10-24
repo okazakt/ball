@@ -79,28 +79,17 @@ test('rounded transparent walls remain valid at every grid placement', async () 
     for (const vertical of [false, true]) {
       const geometry = setRibFaces(solidGeometry([[x - 3.8, z - 3.8,
         x + (vertical ? 3.8 : 103.8), z + (vertical ? 103.8 : 3.8)]], 1,
-        { bevel: .0375, bevelOffset: -.0375, bevelSegments: 12, fillet: .038 }));
+        { bevel: .004, bevelOffset: -.004, bevelSegments: 5, fillet: .038 }));
       checkBody(geometry);
       assert.equal(geometry.groups.length, 1);
       assert.ok(geometry.groups.every(group => group.count > 0));
       geometry.dispose();
     }
   const material = ribMaterials();
-  assert.equal(material.transmission, .88);
-  assert.equal(material.ior, 1.5);
-  assert.equal(material.thickness, .5);
-  assert.equal(material.roughness, .12);
-  assert.equal(material.metalness, 0);
-  assert.equal(material.clearcoat, 1);
-  assert.equal(material.clearcoatRoughness, .05);
-  assert.equal(material.attenuationDistance, .5);
-  assert.equal(material.specularIntensity, 1);
-  assert.equal(material.attenuationColor.getHex(), 0xe8f4ff);
-  assert.equal(material.envMapIntensity, 3);
-  assert.equal(material.emissiveIntensity, 0);
-  assert.equal(material.emissive.getHex(), 0);
-  assert.equal(Object.hasOwn(material, 'onBeforeCompile'), false);
-  assert.equal(material.opacity, 1);
-  assert.equal(material.transparent, false);
+  assert.equal(material.transmission, 0);
+  assert.equal(material.depthWrite, false);
+  assert.equal(material.transparent, true);
+  assert.equal(material.userData.wallUniforms.centerOpacity.value, .02);
+  assert.equal(Object.keys(material.userData.wallUniforms).length, 5);
   material.dispose();
 });
