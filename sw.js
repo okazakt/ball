@@ -1,4 +1,4 @@
-const CACHE = 'toukan-1.5.0+9fcda0fdc211';
+const CACHE = 'toukan-2.0.0+58a34f47f9d3';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const ASSETS = [
   './src/wall-diagnostics.js',
   './src/case-visuals.js',
   './src/stage.js',
+  './src/mechanics.js',
   './src/editor.js',
   './src/storage.js',
   './src/audio.js',
@@ -38,7 +39,11 @@ self.addEventListener('activate', (e) =>
       )
       .then(() => self.clients.claim())
       .then(() => self.clients.matchAll({ type: 'window' }))
-      .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url))))
+      .then((clients) => {
+        // Do not keep activation waiting for a navigation that itself waits
+        // for this worker to finish activating.
+        clients.forEach((client) => { client.navigate(client.url).catch(() => {}); });
+      })
   )
 );
 self.addEventListener('fetch', (e) => {

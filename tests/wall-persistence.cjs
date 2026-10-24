@@ -43,7 +43,7 @@ const fs = require('node:fs');
     assert.ok(diagnostics.pixelProbe.sampledWallPixels > 100);
     assert.equal(diagnostics.pixelProbe.reflectionInvalidPixels, 0);
     assert.equal(diagnostics.pixelProbe.backgroundInvalidPixels, 0);
-    assert.ok(diagnostics.draws.length >= 3);
+    assert.ok(diagnostics.draws.length >= 2);
     for (const draw of diagnostics.draws) {
       assert.equal(draw.linked, true);
       assert.equal(draw.triangleOrder, 'bottom-to-top');
@@ -53,10 +53,10 @@ const fs = require('node:fs');
         assert.ok(Math.abs(draw.gpuValues[key] - value) < 1e-5, `GPU mismatch: ${key}`);
     }
     assert.equal(await page.evaluate(() => window.__toukan.game.renderer.domElement.toDataURL()), beforeDiagnostics);
-    fs.mkdirSync('/workspace/ball-captures/v1.4.4', { recursive: true });
-    await page.screenshot({ path: '/workspace/ball-captures/v1.4.4/top.png' });
+    fs.mkdirSync('/workspace/ball-captures/v2.0.0', { recursive: true });
+    await page.screenshot({ path: '/workspace/ball-captures/v2.0.0/top.png' });
     await page.evaluate(() => { const g = window.__toukan.game; g.tilt = { x: .35, z: -.35 }; g.renderScene(); });
-    await page.screenshot({ path: '/workspace/ball-captures/v1.4.4/tilted.png' });
+    await page.screenshot({ path: '/workspace/ball-captures/v2.0.0/tilted.png' });
     // Force a real non-finite GPU uniform into both radiance paths. The old
     // shader poisoned its entire color; the guarded shader must stay visible.
     const faultResult = await page.evaluate(async () => {

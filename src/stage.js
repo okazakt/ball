@@ -1,6 +1,5 @@
-export const COLS = 8,
-  ROWS = 11,
-  GAP = 3;
+import { COLS, ROWS, GAP, footprint, sharedEdge, direction } from './mechanics.js';
+export { COLS, ROWS, GAP };
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 export const wallKey = (axis, x, z) => `${axis}:${x}:${z}`;
 export function floor(dark = false) {
@@ -11,8 +10,7 @@ export function floor(dark = false) {
 }
 export function defaultStage() {
   const a = floor(),
-    b = floor(),
-    c = floor();
+    b = floor();
   a.walls.push(
     ...[0, 1, 2, 4, 5].map((x) => ({ axis: 'h', x, z: 3 })),
     ...[1, 2, 3, 4].map((x) => ({ axis: 'h', x, z: 6 })),
@@ -28,17 +26,13 @@ export function defaultStage() {
   a.cells = [
     { x: 4, z: 7, type: 'hole' },
     { x: 1, z: 4, type: 'sticky' },
-    { x: 3, z: 3, type: 'door', rotation: 0 },
+    { x: 3, z: 3, type: 'door', rotation: 1 },
     { x: 2, z: 2, type: 'switch' },
+    { x: 0, z: 9, type: 'ramp', rotation: 2 },
+    { x: 6, z: 9, type: 'goal' },
   ];
-  b.cells = [
-    { x: 1, z: 7, type: 'hole' },
-    { x: 2, z: 4, type: 'sticky' },
-  ];
-  b.walls.push(...[0, 1, 3, 4, 5].map((x) => ({ axis: 'h', x, z: 4 })));
-  c.cells = [
-    { x: 4, z: 7, type: 'goal' },
-  ];
+  b.cells = [{ x: 2, z: 5, type: 'sticky' }];
+  b.walls.push(...[2, 3, 4, 5].map(x => ({ axis: 'h', x, z: 4 })));
   return {
     version: 1,
     name: '光の通り道',
@@ -48,12 +42,12 @@ export function defaultStage() {
     balls: [
       { x: 1, z: 1 },
     ],
-    floors: [a, b, c],
+    floors: [a, b],
   };
 }
-const typeList = ['hole', 'goal', 'sticky', 'switch', 'door', 'robot', 'spider', 'slime', 'corner'];
+const typeList = ['hole', 'goal', 'sticky', 'switch', 'door', 'robot', 'spider', 'slime', 'corner', 'ramp'];
 const types = new Set(typeList);
-export function validateStage(s) {
+export function validateStage(s, { allowIncomplete = false } = {}) {
   if (
     !s ||
     s.version !== 1 ||
@@ -66,11 +60,10 @@ export function validateStage(s) {
     s.limit < 10 ||
     s.limit > 3600 ||
     !Array.isArray(s.balls) ||
-    s.balls.length < 1 ||
+    s.balls.length < (allowIncomplete ? 0 : 1) ||
     s.balls.length > 3 ||
     !Array.isArray(s.floors) ||
-    !s.floors.length ||
-    s.floors.length > 12
+    s.floors.length !== 2
   )
     throw Error('ステージ形式が正しくありません');
   const cell = (p) =>
@@ -80,9 +73,10 @@ export function validateStage(s) {
     p.x < COLS &&
     p.z >= 0 &&
     p.z < ROWS;
-  if (!s.balls.every(cell) || new Set(s.balls.map((p) => `${p.x},${p.z}`)).size !== s.balls.length)
+  if (!s.balls.every(p => cell(p) && [0, 1].includes(p.floor ?? 0)) || new Set(s.balls.map(p => `${p.floor ?? 0}:${p.x},${p.z}`)).size !== s.balls.length)
     throw Error('玉の位置が正しくありません');
   let goals = 0;
+  const occupiedLayers = [new Map(), new Map()];
   s.floors.forEach((f, i) => {
     if (
       !Array.isArray(f.walls) ||
@@ -108,7 +102,6 @@ export function validateStage(s) {
       if (keys.has(k)) throw Error('壁が重複しています');
       keys.add(k);
     }
-    const occupied = new Map();
     for (const c of f.cells) {
       if (
         !cell(c) ||
@@ -118,32 +111,38 @@ export function validateStage(s) {
         (c.rule !== undefined && !['left', 'right', 'random'].includes(c.rule))
       )
         throw Error('素材が正しくありません');
-      const k = `${c.x},${c.z}`,
-        list = occupied.get(k) || [];
-      if (
-        list.length &&
-        !(
-          (list.every((t) => t === 'sticky') && c.type === 'door') ||
-          (list.every((t) => t === 'door') && c.type === 'sticky')
-        )
-      )
-        throw Error('共存できない素材があります');
-      list.push(c.type);
-      occupied.set(k, list);
+      if (c.type === 'ramp' && i !== 0) throw Error('坂道は上下を結ぶ上段素材として配置してください');
+      const cells = footprint(c);
+      if (!cells.every(cell)) throw Error('2マス素材が盤面からはみ出しています');
+      const layers = c.type === 'ramp' || (c.type === 'door' && i === 0) ? [0, 1] : [i];
+      for (const layer of layers) for (const tile of cells) {
+        const key = `${tile.x},${tile.z}`;
+        if (occupiedLayers[layer].has(key)) throw Error('素材の占有範囲・可動域が重なっています');
+        occupiedLayers[layer].set(key, c);
+      }
+      if (cells.length === 2) {
+        const edge = sharedEdge(cells[0], cells[1]);
+        for (const layer of layers)
+          if (s.floors[layer].walls.some(w => wallKey(w.axis,w.x,w.z) === wallKey(edge.axis,edge.x,edge.z)))
+            throw Error('2マス素材の途中に仕切り壁があります');
+        if (c.type === 'ramp') {
+          const [dx,dz] = direction(c), exit = { x: c.x + 2*dx, z: c.z + 2*dz };
+          if (!cell(exit)) throw Error('坂道の上側出口を盤面内へ向けてください');
+          const exitEdge = sharedEdge(cells[1], exit);
+          if (s.floors[0].walls.some(w => wallKey(w.axis,w.x,w.z) === wallKey(exitEdge.axis,exitEdge.x,exitEdge.z)))
+            throw Error('坂道の上側出口に仕切り壁があります');
+        }
+      }
       if (c.type === 'goal') goals++;
       if (c.type === 'hole' && i === s.floors.length - 1)
-        throw Error('最下層には穴を配置できません');
+        throw Error('下段には穴を配置できません');
     }
-    if (i === 0)
-      for (const p of s.balls)
-        if (
-          f.cells.some(
-            (c) => c.x === p.x && c.z === p.z && c.type !== 'sticky' && c.type !== 'switch'
-          )
-        )
-          throw Error('玉の開始位置に素材があります');
   });
-  if (!goals) throw Error('ゴールを1つ以上配置してください');
+  for (const p of s.balls) {
+    const material = occupiedLayers[p.floor ?? 0].get(`${p.x},${p.z}`);
+    if (material && !['sticky','switch'].includes(material.type)) throw Error('玉の開始位置に素材・可動域があります');
+  }
+  if (!goals && !allowIncomplete) throw Error('ゴールを1つ以上配置してください');
   return clone(s);
 }
 export function encodeStage(s) {
@@ -154,7 +153,7 @@ export function encodeStage(s) {
     a: s.author,
     t: s.limit,
     s: s.size,
-    b: s.balls.map((b) => [b.x, b.z]),
+    b: s.balls.map(b => [b.x, b.z, b.floor ?? 0]),
     f: s.floors.map((f) => [
       f.dark ? 1 : 0,
       f.walls.map((w) => [w.axis === 'h' ? 0 : 1, w.x, w.z]),
@@ -198,7 +197,7 @@ export function decodeStage(input) {
         author: d.a,
         limit: d.t,
         size: d.s,
-        balls: d.b.map((b) => ({ x: b[0], z: b[1] })),
+        balls: d.b.map(b => ({ x: b[0], z: b[1], floor: b[2] ?? 0 })),
         floors: d.f.map((f) => ({
           dark: !!f[0],
           walls: f[1].map((w) => ({ axis: w[0] === 0 ? 'h' : 'v', x: w[1], z: w[2] })),

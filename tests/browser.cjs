@@ -12,8 +12,12 @@ const assert = require('node:assert/strict');
       page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
+    await page.addInitScript(() => { window.requestAnimationFrame = callback => setTimeout(() => callback(performance.now()),100); });
     await page.goto(process.env.TEST_URL || 'http://localhost:8000');
-    await page.waitForFunction(() => window.__toukan?.game.ready, {}, { timeout: 30000 });
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, {}, { polling: 100 });
+    await page.waitForTimeout(800);
+    await page.waitForFunction(() => window.__toukan?.game.ready && window.__toukan.game.world, {}, { timeout: 30000 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.equal(await page.evaluate(() => window.__toukan.game.state), 'ready');
     await page.evaluate(async () => {
@@ -28,7 +32,7 @@ const assert = require('node:assert/strict');
       };
       const floor = g.floorGroups[0].children.find(m => m.userData.surface === 'floor');
       const walls = g.floorGroups[0].children.find(m => m.userData.surface === 'walls');
-      if (Math.abs(area(floor.geometry) - 87) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
+      if (Math.abs(area(floor.geometry) - 84.808) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
         throw Error('Seamless wallpaper floor or floor hole missing');
       const side = walls.material;
       if (walls.children.length) throw Error('Separate wall ribs remain');
@@ -51,7 +55,7 @@ const assert = require('node:assert/strict');
           g.ambient.intensity !== 0.875 || g.sun.shadow.radius !== 4)
         throw Error('Plastic lighting settings are incorrect');
       if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
-          !g.floorGroups[2].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
+          !g.floorGroups[0].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
         throw Error('Start and goal tile colors are incorrect');
       const { solidGeometry, setRibFaces } = await import(new URL('./src/case-visuals.js', location.href).href);
       for (const rectangles of [
@@ -89,7 +93,7 @@ const assert = require('node:assert/strict');
       await page.evaluate(() => {
         const g = window.__toukan.game, T = window.THREE;
         g.resize();
-        for (const floor of [0, 1, 2]) {
+        for (const floor of [0]) {
           g.viewFloor = floor;
           for (const [x, z] of [[0, 0], [0.3, -0.3], [-0.4, 0.4]]) {
             g.tilt = { x, z };
@@ -97,7 +101,7 @@ const assert = require('node:assert/strict');
             if (g.board.rotation.x !== 0 || g.board.rotation.z !== 0)
               throw Error('Board rotated');
             for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-              const p = new T.Vector3(sx * 4.1, -floor * 3 + 1.07, sz * 5.6).project(g.camera);
+              const p = new T.Vector3(sx * 4.1, 1.07, sz * 5.6).project(g.camera);
               if (Math.abs(p.x - sx) > 1e-6 || Math.abs(p.y + sz) > 1e-6)
                 throw Error('Lid corner moved');
             }
@@ -110,7 +114,7 @@ const assert = require('node:assert/strict');
         g.tilt = { x: 0.3, z: 0.3 };
         g.setLighting();
         const floor = new T.Vector3(0, 0, 0).project(g.camera);
-        const lower = new T.Vector3(0, -3, 0).project(g.camera);
+        const lower = new T.Vector3(0, -1.24, 0).project(g.camera);
         if (!(floor.x < origin.x && floor.y > origin.y && lower.x < floor.x))
           throw Error('Missing depth-dependent parallax');
 
@@ -124,7 +128,7 @@ const assert = require('node:assert/strict');
       const corridor = [5, 6].flatMap(z => Array.from({ length: 8 }, (_, x) => ({ axis: 'h', x, z })));
       for (const [size, radius] of [['S', 0.35], ['M', 0.4]]) {
         g.load({ ...original, size, balls: [{ x: 4, z: 5 }],
-          floors: [{ dark: false, cells: [], walls: [...perimeter, ...corridor] }] }, false);
+          floors: [{ dark: false, cells: [], walls: [...perimeter, ...corridor] }, { dark:false,cells:[],walls:perimeter }] }, false);
         const b = g.balls[0], start = b.body.translation().x;
         if (b.radius !== radius || Math.abs(b.collider.radius() - radius) > 1e-6)
           throw Error('Ball dimensions do not match');
@@ -144,16 +148,16 @@ const assert = require('node:assert/strict');
         if (!bounced) throw Error('Ceiling rebound missing');
       }
       g.load({ ...original, size: 'M', balls: [{ x: 4, z: 5 }],
-        floors: Array.from({ length: 3 }, () => ({ dark: false, cells: [], walls: perimeter })) }, false);
-      for (const fi of [1, 2]) {
+        floors: Array.from({ length: 2 }, () => ({ dark: false, cells: [], walls: perimeter })) }, false);
+      for (const fi of [1]) {
         const b = g.balls[0];
         b.floor = fi;
         b.collider.setCollisionGroups((1 << 16) | 1 | (1 << (fi + 1)));
-        b.body.setTranslation({ x: 0.5, y: -fi * 3 + 0.41, z: 0 }, true);
+        b.body.setTranslation({ x: 0.5, y: -fi * 1.24 + 0.41, z: 0 }, true);
         b.body.setLinvel({ x: 0, y: 6, z: 0 }, true);
         for (let i = 0; i < 6; i++) {
           g.step(1 / 60);
-          if (b.body.translation().y + b.radius > -fi * 3 + 1.015)
+          if (b.body.translation().y + b.radius > -fi * 1.24 + 1.015)
             throw Error('Lower-floor ceiling collision missing');
         }
       }
@@ -165,7 +169,7 @@ const assert = require('node:assert/strict');
       const stage = structuredClone(original);
       stage.floors = [{ dark: false, cells: [], walls: original.floors[0].walls.filter(
         (w) => w.axis === 'h' ? w.z === 0 || w.z === 11 : w.x === 0 || w.x === 8
-      ) }];
+      ) }, structuredClone(original.floors[1])];
       stage.balls = [{ x: 4, z: 5 }];
       g.load(stage, false);
       const b = g.balls[0];
@@ -229,15 +233,15 @@ const assert = require('node:assert/strict');
     );
     await page.waitForFunction(() => window.__toukan.game.state === 'replay');
     await page.waitForFunction(() => window.__toukan.game.state === 'finished');
-    assert.equal(await page.evaluate(() => window.__toukan.game.viewFloor), 1);
+    assert.equal(await page.evaluate(() => window.__toukan.game.viewFloor), 0);
     await page.click('#again');
     await page.click('#start');
     await page.evaluate(() => {
       const g = window.__toukan.game;
       g.enemies.forEach((e) => (e.stun = 100));
       for (const b of g.balls) {
-        b.floor = 2;
-        b.body.setTranslation({ x: 0.5, y: -6 + b.radius + 0.01, z: 2 }, true);
+        b.floor = 0;
+        b.body.setTranslation({ x: 2.5, y: b.radius + 0.01, z: 4 }, true);
         b.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       }
     });
@@ -264,7 +268,7 @@ const assert = require('node:assert/strict');
       ed.touched = new Set();
       ed.paint({ clientX: r.left + (r.width * 1.5) / 8, clientY: r.top + (r.height * 1.5) / 11 });
     });
-    assert.match(await page.locator('#toast').textContent(), /共存できない/);
+    assert.match(await page.locator('#toast').textContent(), /共存|開始位置|可動域/);
     await page.click('[data-tool="wall"]');
     await page.evaluate(() => {
       const ed = window.__toukan.editor;
@@ -285,7 +289,7 @@ const assert = require('node:assert/strict');
     await context.setOffline(false);
     assert.deepEqual(errors, []);
     console.log(
-      'PASS: seamless floor/walls, start/goal colors, S/M corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
+      'PASS: seamless floor/walls, start/goal colors, S/M corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, fixed upper-camera NG replay, upper goals, favorites, QR, editor conflict/undo/redo, offline startup'
     );
   } finally {
     await browser.close();

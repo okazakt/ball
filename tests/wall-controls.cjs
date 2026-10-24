@@ -35,8 +35,7 @@ const fs = require('node:fs');
     await page.evaluate(() => {
       const g = window.__toukan.game, stage = structuredClone(g.stage);
       stage.floors[0].walls.push({ axis: 'v', x: 6, z: 8 });
-      stage.floors[0].cells.push({ type: 'door', x: 2, z: 2 },
-        ...[0, 1, 2, 3].map((rotation, x) => ({ type: 'corner', x, z: 4, rotation })));
+      stage.floors[0].cells.push(...[0, 1, 2, 3].map((rotation, x) => ({ type: 'corner', x, z: 4, rotation })));
       g.load(stage); g.state = 'ready';
       g.renderer.setPixelRatio(2);
       document.querySelector('#start-panel').hidden = true;
@@ -77,7 +76,7 @@ const fs = require('node:fs');
         await page.evaluate(({ key, value }) => {
           const g = window.__toukan.game;
           for (const group of g.floorGroups) group.traverse(m => {
-            if (m.userData.surface === 'walls' || g.doors.some(d => d.mesh === m)) {
+            if (m.userData.surface === 'walls') {
               if (m.children.length || Array.isArray(m.material) || !m.material.transparent || m.material.depthWrite)
                 throw Error('Extra wall parts or opaque material remain');
               if (m.material.userData.wallUniforms[key].value !== value) throw Error('Uniform mismatch');
@@ -131,12 +130,12 @@ const fs = require('node:fs');
     await page.waitForFunction(() => [...window.__toukan.game.wallMaterials]
       .every(material => material.userData.wallShapeThickness.value === 1), {}, { polling: 100 });
     await page.evaluate(() => {
-      const g = window.__toukan.game, mesh = g.doors[0].mesh, y = mesh.position.y;
+      const g = window.__toukan.game, mesh = g.floorGroups[0].children.find(m => m.userData.surface === 'walls'), y = mesh.position.y;
       g.renderScene();
-      if (mesh.material.userData.wallContact.value < .99) throw Error('Closed door must meet lid underside');
+      if (mesh.material.userData.wallContact.value < .99) throw Error('Wall must meet lid underside');
       mesh.position.y += .3; g.renderScene();
-      if (mesh.material.userData.wallBottomContact.value !== 0) throw Error('Raised door must lose floor fusion');
-      if (mesh.material.userData.wallContact.value !== 0) throw Error('Open door must lose fusion reflection');
+      if (mesh.material.userData.wallBottomContact.value !== 0) throw Error('Raised wall must lose floor fusion');
+      if (mesh.material.userData.wallContact.value !== 0) throw Error('Raised wall must lose fusion reflection');
       mesh.position.y = y; g.renderScene();
     });
     // Measure the actual game framebuffer, including its production shaders.
@@ -211,7 +210,7 @@ const fs = require('node:fs');
       const render = () => { g.renderer.clear(); g.renderer.render(g.scene, g.camera); return g.renderer.domElement.toDataURL(); };
       const clear = render(), wallMeshes = [];
       for (const group of g.floorGroups) group.traverse(m => {
-        if (m.userData.surface === 'walls' || g.doors.some(d => d.mesh === m)) { wallMeshes.push(m); m.visible = false; }
+        if (m.userData.surface === 'walls') { wallMeshes.push(m); m.visible = false; }
       });
       if (render() !== clear) throw Error('Clear wall changes the background');
       wallMeshes.forEach(m => m.visible = true);

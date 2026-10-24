@@ -15,7 +15,7 @@ test('untrusted shared stages reject invalid coordinates, overlaps and bounds', 
     (s) => (s.balls[0].x = -1),
     (s) => s.floors[0].walls.push({ ...s.floors[0].walls[0] }),
     (s) => s.floors[0].cells.push({ x: 4, z: 7, type: 'goal' }),
-    (s) => s.floors[2].cells.push({ x: 0, z: 0, type: 'hole' }),
+    (s) => s.floors[1].cells.push({ x: 0, z: 0, type: 'hole' }),
     (s) => (s.limit = Infinity),
     (s) => (s.size = 'XL'),
     (s) => (s.size = 'L'),
@@ -27,16 +27,19 @@ test('untrusted shared stages reject invalid coordinates, overlaps and bounds', 
   }
   assert.throws(() => decodeStage('x'.repeat(60001)));
 });
-test('sticky floor and door may coexist; duplicate floor items may not', () => {
-  const s = defaultStage();
-  s.floors[1].cells.push({ x: 2, z: 4, type: 'door' });
-  assert.doesNotThrow(() => validateStage(s));
-  s.floors[1].cells.push({ x: 2, z: 4, type: 'sticky' });
-  assert.throws(() => validateStage(s));
+test('two-cell doors reserve parking and lower post travel, and reject crossing walls', () => {
+  for (const layer of [0,1]) {
+    const s = defaultStage(); s.floors[layer].cells.push({ x:4,z:3,type:'sticky' });
+    assert.throws(() => validateStage(s), /可動域/);
+    const w = defaultStage(); w.floors[layer].walls.push({ axis:'v',x:4,z:3 });
+    assert.throws(() => validateStage(w), /途中/);
+  }
+  const s = defaultStage(); s.floors[0].cells.push({ x:7,z:5,type:'door',rotation:1 });
+  assert.throws(() => validateStage(s), /はみ出/);
 });
 test('stage must contain a goal and unique ball starts', () => {
   const s = defaultStage();
-  s.floors = [floor()];
+  s.floors = [floor(), floor()];
   assert.throws(() => validateStage(s));
   s.floors[0].cells.push({ x: 3, z: 8, type: 'goal' });
   s.balls[1] = { ...s.balls[0] };
@@ -68,26 +71,39 @@ test('quest begins with one ball, no enemies, bright floors and expanded bounds'
   assert.equal(s.balls.length, 1);
   assert.ok(s.floors.every((f) => !f.dark));
   assert.ok(s.floors.every((f) => !f.cells.some((c) => ['robot', 'spider', 'slime'].includes(c.type))));
-  s.floors[2].cells.push({ x: 7, z: 10, type: 'goal' });
+  s.floors[1].cells.push({ x: 7, z: 10, type: 'goal' });
   assert.doesNotThrow(() => validateStage(s));
-  s.floors[2].cells.push({ x: 8, z: 10, type: 'goal' });
+  s.floors[1].cells.push({ x: 8, z: 10, type: 'goal' });
   assert.throws(() => validateStage(s));
 });
 
-test('initial B1 matches the reference layout without changing later floors', () => {
-  const s = validateStage(defaultStage()), f = s.floors[0];
-  const interior = f.walls.filter(w => w.axis === 'h' ? w.z > 0 && w.z < 11 : w.x > 0 && w.x < 8)
-    .map(w => `${w.axis}:${w.x}:${w.z}`).sort();
-  assert.deepEqual(interior, [
-    'h:0:3', 'h:1:3', 'h:2:3', 'h:4:3', 'h:5:3', 'h:7:3',
-    'h:1:6', 'h:2:6', 'h:3:6', 'h:4:6',
-    'h:5:1', 'h:6:1', 'h:7:1', 'h:4:2', 'h:6:2', 'h:7:2', 'h:5:4', 'h:6:4',
-    'v:2:0', 'v:3:0', 'v:4:0', 'v:5:2', 'v:7:2', 'v:5:4',
-  ].sort());
-  assert.deepEqual(s.balls, [{ x: 1, z: 1 }]);
-  assert.deepEqual(f.cells, [
-    { x: 4, z: 7, type: 'hole' }, { x: 1, z: 4, type: 'sticky' },
-    { x: 3, z: 3, type: 'door', rotation: 0 }, { x: 2, z: 2, type: 'switch' },
-  ]);
-  assert.equal(s.floors.length, 3);
+test('quest uses adjacent upper/lower layers with upper start/goal and a corner return ramp', () => {
+  const s = validateStage(defaultStage());
+  assert.equal(s.floors.length,2);
+  assert.ok(s.balls.every(b => (b.floor ?? 0) === 0));
+  assert.ok(s.floors[0].cells.some(c => c.type === 'goal'));
+  assert.ok(s.floors[0].cells.some(c => c.type === 'ramp' && c.x === 0 && c.z === 9));
+  for (const floors of [[floor()], [floor(),floor(),floor()]]) assert.throws(() => validateStage({ ...s, floors }));
+});
+test('lower starts and goals survive sharing, with separate starts at equal coordinates', () => {
+  const s = defaultStage();
+  s.balls = [{ x:6,z:8,floor:0 }, { x:6,z:8,floor:1 }];
+  s.floors[1].cells.push({ x:6,z:9,type:'goal' });
+  const shared = decodeStage(encodeStage(s));
+  assert.deepEqual(shared.balls,s.balls);
+  assert.ok(shared.floors[1].cells.some(c => c.type === 'goal'));
+  s.balls[0].floor = 2; assert.throws(() => validateStage(s));
+});
+test('ramps reserve both layers and need an unobstructed upper exit', () => {
+  const s = defaultStage(); s.floors[1].cells.push({ x:0,z:8,type:'sticky' });
+  assert.throws(() => validateStage(s), /可動域/);
+  const w = defaultStage(); w.floors[0].walls.push({ axis:'h',x:0,z:8 });
+  assert.throws(() => validateStage(w), /出口/);
+  const out = defaultStage(); out.floors[0].cells.find(c => c.type === 'ramp').rotation = 0;
+  assert.throws(() => validateStage(out));
+});
+test('unfinished editor layouts can be checked without requiring a start or goal', () => {
+  const s = defaultStage(); s.balls=[]; s.floors.forEach(f => f.cells=f.cells.filter(c=>c.type!=='goal'));
+  assert.throws(() => validateStage(s));
+  assert.doesNotThrow(() => validateStage(s,{allowIncomplete:true}));
 });

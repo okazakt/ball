@@ -1,4 +1,5 @@
-import { COLS, ROWS, clone, floor, validateStage, wallKey } from './stage.js';
+import { footprint } from './mechanics.js';
+import { COLS, ROWS, clone, validateStage, wallKey } from './stage.js';
 const labels = {
   wall: '直線壁',
   corner: '曲面壁',
@@ -7,7 +8,8 @@ const labels = {
   hole: '穴',
   goal: 'ゴール',
   sticky: '粘着床',
-  door: 'ドア',
+  door: '横ドア（2マス）',
+  ramp: '坂道（2マス）',
   switch: 'スイッチ',
   robot: 'ロボット',
   spider: '蜘蛛',
@@ -17,7 +19,8 @@ const colors = {
   hole: '#050a0e',
   goal: '#ef334b',
   sticky: '#b068cc',
-  door: '#ffb775',
+  door: '#64bd8f',
+  ramp: '#9ee3c4',
   switch: '#f5dc97',
   robot: '#fa8b6a',
   spider: '#dd939b',
@@ -88,16 +91,6 @@ export class Editor {
       this.fi = Number(e.target.value);
       this.draw();
     };
-    document.querySelector('#add-floor').onclick = () => {
-      if (this.stage.floors.length >= this.unlocked) {
-        this.toast(`クエストで到達した B${this.unlocked} まで作成できます`);
-        return;
-      }
-      this.snapshot();
-      this.stage.floors.push(floor());
-      this.fi = this.stage.floors.length - 1;
-      this.draw();
-    };
     document.querySelector('#dark-floor').onclick = () => {
       this.snapshot();
       this.stage.floors[this.fi].dark = !this.stage.floors[this.fi].dark;
@@ -124,9 +117,8 @@ export class Editor {
       }
     };
   }
-  open(stage, unlocked) {
+  open(stage) {
     this.stage = clone(stage);
-    this.unlocked = unlocked;
     this.fi = 0;
     this.undo = [];
     this.redo = [];
@@ -174,60 +166,34 @@ export class Editor {
     const key = edgeMode ? wallKey(edge.axis, edge.x, edge.z) : `${x}:${z}`;
     if (this.touched.has(key)) return;
     this.touched.add(key);
+    const candidate = clone(this.stage), layer = candidate.floors[this.fi];
     if (edgeMode) {
-      const i = f.walls.findIndex((w) => wallKey(w.axis, w.x, w.z) === key);
-      if (this.tool === 'erase') {
-        if (i >= 0) f.walls.splice(i, 1);
-      } else if (i < 0) f.walls.push(edge);
+      const i = layer.walls.findIndex(w => wallKey(w.axis,w.x,w.z) === key);
+      if (this.tool === 'erase') { if (i >= 0) layer.walls.splice(i,1); }
+      else if (i < 0) layer.walls.push(edge);
     } else if (this.tool === 'erase') {
-      f.cells = f.cells.filter((c) => c.x !== x || c.z !== z);
-      if (this.fi === 0) this.stage.balls = this.stage.balls.filter((b) => b.x !== x || b.z !== z);
-    } else if (this.tool === 'ball') {
-      if (this.fi !== 0) {
-        this.toast('玉は最上層に配置してください');
-        return;
-      }
-      if (this.stage.balls.length >= 3) {
-        this.toast('玉は最大3個です。消しゴムで移動できます');
-        return;
-      }
-      if (
-        f.cells.some((c) => c.x === x && c.z === z) ||
-        this.stage.balls.some((b) => b.x === x && b.z === z)
-      ) {
-        this.conflict(x, z);
-        return;
-      }
-      this.stage.balls.push({ x, z });
-    } else {
-      const existing = f.cells.filter((c) => c.x === x && c.z === z);
-      const compatible =
-        existing.length === 1 &&
-        ((existing[0].type === 'sticky' && this.tool === 'door') ||
-          (existing[0].type === 'door' && this.tool === 'sticky'));
-      if (
-        (existing.length && !compatible) ||
-        (this.fi === 0 && this.stage.balls.some((b) => b.x === x && b.z === z))
-      ) {
-        this.conflict(x, z);
-        return;
-      }
-      if (this.tool === 'hole' && this.fi === this.stage.floors.length - 1) {
-        this.toast('穴の下に階層を追加してください');
-        return;
-      }
-      f.cells.push({
-        x,
-        z,
-        type: this.tool,
-        rotation: this.rotation,
-        rule: this.tool === 'slime' ? 'random' : this.rotation % 2 ? 'left' : 'right',
+      candidate.floors.forEach((floor,owner) => {
+        floor.cells = floor.cells.filter(c => {
+          const visible = owner === this.fi || (owner === 0 && this.fi === 1 && ['ramp','door'].includes(c.type));
+          return !visible || !footprint(c).some(p => p.x === x && p.z === z);
+        });
       });
+      candidate.balls = candidate.balls.filter(b => (b.floor ?? 0) !== this.fi || b.x !== x || b.z !== z);
+    } else if (this.tool === 'ball') {
+      if (candidate.balls.length >= 3) { this.toast('玉は最大3個です。消しゴムで移動できます'); return; }
+      candidate.balls.push({ x,z,floor:this.fi });
+    } else {
+      const owner = this.tool === 'ramp' ? 0 : this.fi;
+      candidate.floors[owner].cells.push({ x,z,type:this.tool,rotation:this.rotation,
+        rule: this.tool === 'slime' ? 'random' : this.rotation % 2 ? 'left' : 'right' });
     }
+    try { validateStage(candidate, { allowIncomplete: true }); }
+    catch (error) { this.conflict(x,z,error.message); return; }
+    this.stage = candidate;
     this.draw();
   }
-  conflict(x, z) {
-    this.toast('共存できない素材があります');
+  conflict(x, z, message = '共存できない素材があります') {
+    this.toast(message);
     this.flash = { x, z };
     let n = 0;
     const blink = () => {
@@ -259,26 +225,22 @@ export class Editor {
       c.lineTo(COLS * 60, z * 60);
       c.stroke();
     }
-    for (const t of this.stage.floors[this.fi].cells) {
-      c.fillStyle = colors[t.type];
-      c.fillRect(t.x * 60 + 9, t.z * 60 + 9, 42, 42);
-      c.fillStyle = '#10232f';
-      c.font = '10px sans-serif';
-      c.textAlign = 'center';
-      c.fillText(labels[t.type], t.x * 60 + 30, t.z * 60 + 32);
-      if (t.rotation) {
-        c.fillText(['↓', '→', '↑', '←'][t.rotation], t.x * 60 + 30, t.z * 60 + 46);
-      }
+    const materials = [...this.stage.floors[this.fi].cells];
+    if (this.fi === 1) materials.push(...this.stage.floors[0].cells.filter(c => ['ramp','door'].includes(c.type)).map(c => ({ ...c, lowerView: true })));
+    for (const t of materials) {
+      const cells = footprint(t), x = Math.min(...cells.map(c => c.x))*60, z = Math.min(...cells.map(c => c.z))*60;
+      const width = (Math.max(...cells.map(c => c.x))-Math.min(...cells.map(c => c.x))+1)*60;
+      const height = (Math.max(...cells.map(c => c.z))-Math.min(...cells.map(c => c.z))+1)*60;
+      c.fillStyle = t.lowerView && t.type === 'door' ? '#4b756b' : colors[t.type];
+      c.fillRect(x+8,z+8,width-16,height-16);
+      c.fillStyle = '#10232f'; c.font = '10px sans-serif'; c.textAlign = 'center';
+      c.fillText(t.lowerView && t.type === 'door' ? '支柱可動域' : t.type === 'door' ? '横ドア' : t.type === 'ramp' ? '坂道' : labels[t.type], x+width/2,z+height/2);
+      if (cells.length === 2 || t.rotation) c.fillText(['↓','→','↑','←'][t.rotation ?? 0],x+width/2,z+height/2+15);
     }
-    if (this.fi === 0)
-      for (const b of this.stage.balls) {
-        c.fillStyle = '#176bff';
-        c.fillRect(b.x * 60 + 1, b.z * 60 + 1, 58, 58);
-        c.fillStyle = colors.ball;
-        c.beginPath();
-        c.arc(b.x * 60 + 30, b.z * 60 + 30, 11, 0, Math.PI * 2);
-        c.fill();
-      }
+    for (const b of this.stage.balls) if ((b.floor ?? 0) === this.fi) {
+      c.fillStyle = '#176bff'; c.fillRect(b.x*60+1,b.z*60+1,58,58);
+      c.fillStyle = colors.ball; c.beginPath(); c.arc(b.x*60+30,b.z*60+30,11,0,Math.PI*2); c.fill();
+    }
     c.strokeStyle = '#7cdaec';
     c.lineWidth = 5;
     for (const w of this.stage.floors[this.fi].walls) {
@@ -288,7 +250,7 @@ export class Editor {
       c.stroke();
     }
     const select = document.querySelector('#edit-floor');
-    select.replaceChildren(...this.stage.floors.map((_, i) => new Option(`B${i + 1}`, i)));
+    select.replaceChildren(...this.stage.floors.map((_, i) => new Option(i === 0 ? '上段' : '下段', i)));
     select.value = this.fi;
     document.querySelector('#dark-floor').textContent = `暗闇 ${
       this.stage.floors[this.fi].dark ? 'ON' : 'OFF'

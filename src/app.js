@@ -3,7 +3,7 @@ import { VERSION } from './version.js';
 import { Game } from './game.js';
 import { Sound } from './audio.js';
 import { Editor } from './editor.js';
-import { defaultStage, decodeStage, stageURL } from './stage.js';
+import { defaultStage, decodeStage, stageURL, validateStage } from './stage.js';
 import * as store from './storage.js';
 const $ = (s) => document.querySelector(s);
 const displayVersion = VERSION.split('+')[0];
@@ -11,8 +11,7 @@ $('#app-version').textContent = `v${displayVersion}`;
 $('#menu-version').textContent = `表示中のバージョン：v${displayVersion}`;
 let toastTimer,
   stage = defaultStage(),
-  lastResult,
-  unlocked = 1;
+  lastResult;
 function toast(text) {
   $('#toast').textContent = text;
   $('#toast').classList.add('show');
@@ -43,23 +42,17 @@ const game = new Game($('#viewport'), sound, {
         ? '見つかった！ 追跡から逃げよう'
         : g.noise > 0.6
         ? '大きな音！ 敵が調べに来ます'
-        : '静かに、光の先へ。';
+        : g.balls.some(b => !b.done && b.floor === 1) ? '下段の玉を、坂道へ。視点は上段に固定。' : '静かに、光の先へ。';
     $('#timer').textContent = g.elapsed.toFixed(2).padStart(6, '0');
     $('#balls-status').textContent = g.balls.map((b) => (b.done ? '○' : '●')).join(' ');
     $('#noise').textContent =
       'NOISE ' + Array.from({ length: 5 }, (_, i) => (i < g.noise * 5 ? '▰' : '░')).join('');
-    $('#floor-label').innerHTML = `B${g.viewFloor + 1} <span>${
-      stage.floors[g.viewFloor]?.dark ? 'DARK SECTOR' : 'LIGHT WELL'
-    }</span>`;
-    $('#floor-status').textContent = `B${g.viewFloor + 1} / B${stage.floors.length}`;
+    $('#floor-label').innerHTML = '上段 <span>FIXED VIEW</span>';
+    $('#floor-status').textContent = g.balls.some(b => !b.done && b.floor === 1) ? '下段の玉を操作中 · 視点は上段' : '上段・下段';
     $('#tilt-indicator i').style.transform = `translate(${g.tilt.z * 30}px,${g.tilt.x * 30}px)`;
   },
   status(t) {
     $('#status').textContent = t;
-  },
-  reached(n) {
-    unlocked = Math.max(unlocked, n);
-    store.unlock(n).catch(() => toast('進行状況を保存できませんでした'));
   },
   finished(result, log) {
     lastResult = result;
@@ -166,8 +159,11 @@ function showResult(r) {
 }
 async function play(s, quest = false) {
   clearTimeout(game.autoReplay);
+  let valid;
+  try { valid = validateStage(s); }
+  catch (error) { toast(error.message); return; }
   closeDialogs();
-  stage = s;
+  stage = valid;
   game.load(stage, quest);
   store.saveStage(stage).catch(() => toast('ステージの履歴を保存できませんでした'));
 }
@@ -222,7 +218,7 @@ $('#gyro').onclick = async () => {
 $('#quest').onclick = () => play(defaultStage(), true);
 $('#edit').onclick = () => {
   closeDialogs();
-  editor.open(stage, unlocked);
+  editor.open(stage);
 };
 $('#sound').onclick = async () => {
   try {
@@ -318,7 +314,7 @@ async function showLibrary() {
         title = document.createElement('strong'),
         p = document.createElement('p');
       title.textContent = (item.favorite ? '★ ' : '') + item.stage.name;
-      p.textContent = `@${item.stage.author} · ${item.stage.floors.length}階層`;
+      p.textContent = `@${item.stage.author} · 上下2段`;
       article.append(title, p);
       for (const [label, action] of [
         ['遊ぶ', () => play(item.stage)],
@@ -392,7 +388,6 @@ window.addEventListener('focus', async () => {
   } catch {}
 });
 await store.openStorage();
-unlocked = await store.getUnlocked();
 $('#storage-note').textContent = store.persistent
   ? '履歴は最新50件。お気に入りは自動削除されません。'
   : '一時保存モード：このブラウザでは永続保存が使えません。';

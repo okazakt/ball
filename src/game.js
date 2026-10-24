@@ -1,3 +1,4 @@
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, rampHull, footprint } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { loadWallSettings, saveWallSettings } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -5,6 +6,7 @@ import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
+  MAX_TILT = 0.5,
   LID_Y = 1.07,
   CASE_WIDTH = COLS + 0.2,
   CASE_DEPTH = ROWS + 0.2,
@@ -128,7 +130,7 @@ export class Game {
     this.updateCamera();
   }
   updateCamera() {
-    const lidY = -(this.viewFloor || 0) * GAP + LID_Y;
+    const lidY = LID_Y;
     const eyeX = -Math.tan(this.tilt.z) * this.distance;
     const eyeZ = -Math.tan(this.tilt.x) * this.distance;
     // Keep the optical axis perpendicular to the lid. The asymmetric frustum
@@ -204,6 +206,7 @@ export class Game {
   }
   load(stage, quest = true) {
     if (!this.ready) return;
+    if (stage.floors.length !== 2) throw Error('上段・下段の2段構造にしてください');
     if (!['S', 'M'].includes(stage.size)) throw Error('玉サイズはSまたはMを指定してください');
     clearTimeout(this.wallGeometryTimer);
     this.stopRecording();
@@ -228,6 +231,7 @@ export class Game {
     this.balls = [];
     this.enemies = [];
     this.doors = [];
+    this.ramps = [];
     this.effects = [];
     this.ripples = [];
     this.lastRipple = -1;
@@ -268,17 +272,12 @@ export class Game {
       this.floorGroups.push(group);
       const start = this.board.children.length;
       const wall = { isWallTemplate: true };
-      const floorRects = [];
-      for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
-        if (f.cells.some(c => c.x === x && c.z === z && c.type === 'hole')) continue;
-        const p = cellPos(x, z);
-        floorRects.push([(x - COLS / 2) * 100, (z - ROWS / 2) * 100,
-          (x + 1 - COLS / 2) * 100, (z + 1 - ROWS / 2) * 100]);
-        this.world.createCollider(this.R.ColliderDesc.cuboid(0.5, 0.12, 0.5)
-          .setTranslation(p.x, y - 0.12, p.z).setFriction(0.1).setRestitution(0.1));
-      }
+      const floorRects = floorRectangles(stage, fi);
+      for (const [x0,z0,x1,z1] of floorRects)
+        this.world.createCollider(this.R.ColliderDesc.cuboid((x1-x0)/2, FLOOR_THICKNESS/2, (z1-z0)/2)
+          .setTranslation((x0+x1)/2, y-FLOOR_THICKNESS/2, (z0+z1)/2).setFriction(0.1).setRestitution(0.1));
       if (floorRects.length) {
-        const floorGeo = solidGeometry(floorRects, 0.24);
+        const floorGeo = solidGeometry(floorRects.map(rect => rect.map(v => v * 100)), FLOOR_THICKNESS);
         const positions = floorGeo.attributes.position, uvs = floorGeo.attributes.uv;
         for (let i = 0; i < positions.count; i++)
           uvs.setXY(i, positions.getX(i) / COLS + 0.5, 0.5 - positions.getZ(i) / ROWS);
@@ -329,6 +328,7 @@ export class Game {
             p.z + (w.axis === 'h' ? -0.5 : 0)).setFriction(0.1).setRestitution(0.7));
         if (!perimeter(w)) this.wallColliders.push({ collider, vertical, door: false });
       }
+      if (fi === 0) {
       const coverMat = new T.MeshPhysicalMaterial({
         color: 0xffffff, transparent: true, opacity: 0.012,
         roughness: 0.08, metalness: 0, clearcoat: 1, envMapIntensity: 0.25,
@@ -349,7 +349,8 @@ export class Game {
       reflection.renderOrder = 100;
       reflection.userData.dynamic = true;
       this.lidReflections.push(reflection);
-      if (fi === 0) for (const start of stage.balls)
+      }
+      for (const start of stage.balls) if ((start.floor ?? 0) === fi)
         this.markCell(start, y, fi, 0x176bff, 'start');
       for (const c of f.cells) {
         const p = cellPos(c.x, c.z);
@@ -433,27 +434,8 @@ export class Game {
           );
           this.effects.push({ mesh, type: 'switch', f: fi, c });
         }
-        if (c.type === 'door') {
-          const body = this.world.createRigidBody(
-            this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, y + 0.5, p.z)
-          );
-          const vertical = (c.rotation || 0) % 2 === 1;
-          const half = this.wallHalfExtents(vertical, true);
-          const collider = this.world.createCollider(
-            this.R.ColliderDesc.cuboid(half.x, half.y, half.z)
-              .setFriction(0.1)
-              .setRestitution(0.7),
-            body
-          );
-          this.wallColliders.push({ collider, vertical, door: true });
-          const halfX = vertical ? 3.8 : 48.8, halfZ = vertical ? 48.8 : 3.8;
-          const factory = () => wallGeometry([[-halfX, -halfZ, halfX, halfZ]], this.wallSettings).translate(0, -0.5, 0);
-          const mesh = this.mesh(factory(), wall, p.x, y + 0.5, p.z, fi);
-          mesh.userData.wallGeometryFactory = factory;
-          mesh.castShadow = false;
-          mesh.userData.dynamic = true;
-          this.doors.push({ body, mesh, fi, c, y, open: false });
-        }
+        if (c.type === 'door') this.createSlidingDoor(c, fi);
+        if (c.type === 'ramp') this.createRamp(c);
         if (c.type === 'corner') {
           const factory = () => curvedWallGeometry(c.rotation || 0, this.wallSettings);
           const geometry = factory();
@@ -475,10 +457,11 @@ export class Game {
     });
     const radius = { S: 0.35, M: 0.4 }[stage.size];
     stage.balls.forEach((p, i) => {
+      const fi = p.floor ?? 0, startY = -fi * GAP;
       const pos = cellPos(p.x, p.z),
         body = this.world.createRigidBody(
           this.R.RigidBodyDesc.dynamic()
-            .setTranslation(pos.x, radius + 0.02, pos.z)
+            .setTranslation(pos.x, startY + radius + 0.02, pos.z)
             .setLinearDamping(0.02)
             .setAngularDamping(0.02)
             .setCcdEnabled(true)
@@ -515,12 +498,12 @@ export class Game {
         new T.SphereGeometry(radius, 24, 16),
         mat,
         pos.x,
-        radius + 0.02,
+        startY + radius + 0.02,
         pos.z,
-        0
+        fi
       );
       const light = new T.PointLight(['#ffbb77', '#b4f6c7', '#fff2b6'][i], 1.3, 2.2, 1.4);
-      light.layers.set(1);
+      light.layers.set(fi + 1);
       mesh.add(light);
       this.balls.push({
         body,
@@ -528,7 +511,7 @@ export class Game {
         mesh,
         light,
         radius,
-        floor: 0,
+        floor: fi,
         done: false,
         sticky: 0,
         prevSpeed: 0,
@@ -537,6 +520,50 @@ export class Game {
     this.updateWallSettings({});
     this.sync();
     this.events.loaded?.();
+  }
+  casePlastic() {
+    return new T.MeshPhysicalMaterial({ color: 0x269c67, roughness: .1, metalness: 0,
+      clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
+  }
+  createRamp(c) {
+    const vertices = rampHull(c), geometry = new T.BufferGeometry();
+    geometry.setAttribute('position', new T.BufferAttribute(vertices, 3));
+    const faces = [[0,1,2,3],[4,7,6,5],[0,4,5,1],[1,5,6,2],[2,6,7,3],[3,7,4,0]], indices = [];
+    const center = new T.Vector3();
+    for (let i=0;i<8;i++) center.add(new T.Vector3().fromArray(vertices,i*3));
+    center.multiplyScalar(1/8);
+    for (let face of faces) {
+      const a = new T.Vector3().fromArray(vertices,face[0]*3), b = new T.Vector3().fromArray(vertices,face[1]*3), d = new T.Vector3().fromArray(vertices,face[2]*3);
+      if (b.clone().sub(a).cross(d.clone().sub(a)).dot(a.clone().sub(center)) < 0) face = [...face].reverse();
+      indices.push(face[0],face[1],face[2],face[0],face[2],face[3]);
+    }
+    geometry.setIndex(indices); geometry.computeVertexNormals();
+    const mesh = this.mesh(geometry, this.casePlastic(), 0, 0, 0, 0);
+    mesh.userData.surface = 'ramp'; mesh.castShadow = false;
+    const desc = this.R.ColliderDesc.convexHull(vertices);
+    if (!desc) throw Error('坂道の立体形状を生成できません');
+    const collider = this.world.createCollider(desc.setFriction(.15).setRestitution(0));
+    this.ramps.push({ c, mesh, collider });
+  }
+  createSlidingDoor(c, fi) {
+    const spec = doorSpec(c, fi), alongX = spec.dx !== 0;
+    const body = this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x, spec.y+.5, spec.z));
+    const collider = this.world.createCollider(this.R.ColliderDesc.cuboid(alongX ? .4 : .06, .46, alongX ? .06 : .4).setFriction(.1).setRestitution(.1), body);
+    const postCollider = this.world.createCollider(this.R.ColliderDesc.cylinder(spec.postHeight/2,.065)
+      .setTranslation(0,spec.postY-(spec.y+.5),0).setFriction(.1).setRestitution(.1), body);
+    const halfX = alongX ? .4 : .06, halfZ = alongX ? .06 : .4;
+    const geometry = solidGeometry([[-halfX*100,-halfZ*100,halfX*100,halfZ*100]], .92,
+      { bevel: .025, bevelOffset: -.025, fillet: .035 }).translate(0,-.46,0);
+    const mesh = this.mesh(geometry, this.casePlastic(), spec.x,spec.y+.5,spec.z,fi);
+    mesh.userData.dynamic = true; mesh.userData.surface = 'door'; mesh.castShadow = false;
+    const post = this.mesh(new T.CylinderGeometry(.065,.065,spec.postHeight,16),this.casePlastic(),spec.x,spec.postY,spec.z,1);
+    post.userData.dynamic = true; post.userData.surface = 'door-post'; post.castShadow = false;
+    this.doors.push({ c, fi, ...spec, body, collider, postCollider, mesh, post, slide: 0, nextSlide: 0, open: false });
+  }
+  setDoorVisual(door, slide) {
+    door.slide = slide;
+    door.mesh.position.set(door.x+door.dx*slide, door.y+.5, door.z+door.dz*slide);
+    door.post.position.set(door.x+door.dx*slide,door.postY,door.z+door.dz*slide);
   }
   markCell(cell, y, fi, color, kind) {
     const p = cellPos(cell.x, cell.z);
@@ -715,8 +742,8 @@ export class Game {
       const c = center(),
         dx = c.x - this.pointerCenter.x,
         dy = c.y - this.pointerCenter.y;
-      this.target.z = clamp(this.target.z + dx * 0.006, -0.32, 0.32);
-      this.target.x = clamp(this.target.x + dy * 0.006, -0.32, 0.32);
+      this.target.z = clamp(this.target.z + dx * 0.006, -MAX_TILT, MAX_TILT);
+      this.target.x = clamp(this.target.x + dy * 0.006, -MAX_TILT, MAX_TILT);
       if (Math.abs(dx) > 18) this.shake(0.45);
       this.pointerCenter = c;
     });
@@ -766,8 +793,8 @@ export class Game {
     this.orientationHandler ??= (e) => {
       if (!this.gyro || e.beta === null || e.gamma === null) return;
       this.gyroBase ??= { b: e.beta, g: e.gamma };
-      this.target.x = clamp((e.beta - this.gyroBase.b) * 0.02, -0.32, 0.32);
-      this.target.z = clamp((e.gamma - this.gyroBase.g) * 0.02, -0.32, 0.32);
+      this.target.x = clamp((e.beta - this.gyroBase.b) * 0.02, -MAX_TILT, MAX_TILT);
+      this.target.z = clamp((e.gamma - this.gyroBase.g) * 0.02, -MAX_TILT, MAX_TILT);
     };
     window.addEventListener('deviceorientation', this.orientationHandler);
     this.motionHandler ??= (e) => {
@@ -836,9 +863,10 @@ export class Game {
       wx = axis === 'h' ? x : Math.max(x, nx),
       wz = axis === 'h' ? Math.max(z, nz) : z;
     if (f.walls.some((w) => w.axis === axis && w.x === wx && w.z === wz)) return true;
-    if (f.cells.some((c) => c.x === nx && c.z === nz && ['hole', 'corner'].includes(c.type)))
+    if (f.cells.some((c) => c.x === nx && c.z === nz && ['hole', 'corner', 'ramp'].includes(c.type)))
       return true;
-    return this.doors.some((d) => d.fi === fi && !d.open && d.c.x === nx && d.c.z === nz);
+    return this.stage.floors[0].cells.some(c => c.type === 'ramp' && footprint(c).some(p => p.x === nx && p.z === nz)) ||
+      this.doors.some(d => (d.fi === fi || d.fi === 0) && footprint(d.c).some(p => p.x === nx && p.z === nz));
   }
   clearSight(fi, a, b) {
     let px = Math.floor(a.x + COLS / 2),
@@ -956,9 +984,9 @@ export class Game {
     const old = { ...this.tilt };
     if (this.keys.size) {
       this.target.z =
-        ((this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('ArrowLeft') ? 1 : 0)) * 0.3;
+        ((this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('ArrowLeft') ? 1 : 0)) * MAX_TILT;
       this.target.x =
-        ((this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0)) * 0.3;
+        ((this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0)) * MAX_TILT;
     } else if (!this.pointers.size && !this.gyro) this.target = { x: 0, z: 0 };
     const response = 1 - Math.pow(1 - 0.35, dt * 60);
     this.tilt.x += (this.target.x - this.tilt.x) * response;
@@ -985,15 +1013,18 @@ export class Game {
           )
       );
       d.open = switched || this.elapsed % 7 > 4;
-      const ty = d.y + (d.open ? 1.55 : 0.5);
-      d.body.setNextKinematicTranslation({ x: d.mesh.position.x, y: ty, z: d.mesh.position.z });
-      d.mesh.position.y = ty;
+      const target = d.open ? 1 : 0;
+      d.nextSlide = d.slide + clamp(target-d.slide,-dt*1.8,dt*1.8);
     }
     if (Math.hypot(this.tilt.x, this.tilt.z) > 0.001)
       for (const b of this.balls) if (!b.done) b.body.wakeUp();
     // Small toy clearances need substeps as well as CCD at high impact speeds.
     this.world.timestep = dt / 4;
     for (let substep = 0; substep < 4; substep++) {
+      for (const door of this.doors) {
+        const slide = door.slide+(door.nextSlide-door.slide)*(substep+1)/4;
+        door.body.setNextKinematicTranslation({ x: door.x+door.dx*slide, y: door.y+.5, z: door.z+door.dz*slide });
+      }
       this.world.step(this.queue);
       this.queue.drainCollisionEvents((h1, h2, started) => {
         if (!started) return;
@@ -1006,6 +1037,7 @@ export class Game {
           }
       });
     }
+    for (const door of this.doors) this.setDoorVisual(door,door.nextSlide);
     for (const b of this.balls) {
       if (b.done) continue;
       const p = b.body.translation(),
@@ -1015,24 +1047,18 @@ export class Game {
         this.finish(false, '盤面の外に落ちました', b);
         return;
       }
-      const nextFloor = clamp(
-        Math.floor((-p.y + b.radius + 0.02) / GAP),
-        0,
-        this.stage.floors.length - 1
-      );
-      if (nextFloor > b.floor) {
+      const bottom = p.y-b.radius;
+      const nextFloor = bottom < -.32 ? 1 : bottom > -.12 ? 0 : b.floor;
+      if (nextFloor !== b.floor) {
         b.floor = nextFloor;
-        b.collider.setCollisionGroups((1 << 16) | 1 | (1 << (b.floor + 1)));
-        b.mesh.layers.set(b.floor + 1);
-        b.light.layers.set(b.floor + 1);
-        b.mesh.material.envMapIntensity = this.stage.floors[b.floor].dark ? 0.015 : 0.22;
-        if (this.quest) this.events.reached?.(b.floor + 1);
+        b.mesh.layers.set(nextFloor+1); b.light.layers.set(nextFloor+1);
+        b.mesh.material.envMapIntensity = this.stage.floors[nextFloor].dark ? .015 : .22;
       }
       const f = this.stage.floors[b.floor];
       const near = f.cells.filter((c) => {
         const q = cellPos(c.x, c.z);
         return (
-          Math.abs(q.x - p.x) < 0.44 && Math.abs(q.z - p.z) < 0.44 && p.y < -b.floor * GAP + b.radius + 0.12
+          Math.abs(q.x - p.x) < 0.44 && Math.abs(q.z - p.z) < 0.44 && Math.abs(p.y-(-b.floor*GAP+b.radius)) < .16
         );
       });
       const sticky = near.some((c) => c.type === 'sticky');
@@ -1066,7 +1092,7 @@ export class Game {
       ...this.balls.filter((b) => !b.done).map((b) => b.floor),
       this.stage.floors.length - 1
     );
-    this.viewFloor = this.activeFloor;
+    this.viewFloor = 0;
     this.noise = Math.max(0, this.noise - dt * 0.5);
 
     this.logAcc += dt;
@@ -1202,7 +1228,7 @@ export class Game {
       ])
         v[i++] = n;
     for (const d of this.doors) {
-      v[i++] = d.mesh.position.y;
+      v[i++] = d.slide;
       v[i++] = d.open ? 1 : 0;
     }
     this.logHead = (this.logHead + 1) % 18000;
@@ -1249,7 +1275,7 @@ export class Game {
     this.captureMesh?.parent?.remove(this.captureMesh);
     this.captureMesh = null;
     this.state = 'replay';
-    this.viewFloor = this.outcome.floor;
+    this.viewFloor = 0;
   }
   playSavedReplay(saved) {
     this.load(saved.stage, false);
@@ -1298,7 +1324,7 @@ export class Game {
         e.badge.visible = v[i++] > 0;
       }
       for (const d of this.doors) {
-        d.mesh.position.y = v[i++];
+        this.setDoorVisual(d, v[i++]);
         d.open = v[i++] > 0;
       }
     }
