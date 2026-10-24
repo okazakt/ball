@@ -93,70 +93,43 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
   });
   geometry.rotateX(-Math.PI / 2);
   geometry.translate(0, bevel, 0);
-  if (bevel) geometry.userData.rimContours = shapes.flatMap(shape =>
-    [shape, ...shape.holes].map(path => path.getPoints(8).map(p => [p.x, -p.y])));
   return geometry;
 }
 
+// Walls use a straight extrusion with no rounding or bevel offsets. The same
+// united footprint is used for every placement, including L/T/cross junctions.
+export function ribGeometry(rectangles, height = 1) {
+  const footprint = rectangles.map(r => r.map(v => Math.round(v * 1e6) / 1e6));
+  return setRibFaces(solidGeometry(footprint, height));
+}
+
 export function ribMaterials() {
-  return new T.MeshPhysicalMaterial({
-    color: 0xffffff, transmission: 0.95, ior: 1.5,
-    thickness: 0.10, roughness: 0.02, metalness: 0,
-    opacity: 1, transparent: true, depthWrite: false,
-    clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.5,
+  // Alpha blending keeps the floor visible without an extra screen-space
+  // transmission pass for each floor or refracting other walls into the rib.
+  return new T.MeshStandardMaterial({
+    color: 0xddeef3, transparent: true, opacity: 0.18,
+    roughness: 0.22, metalness: 0.05, envMapIntensity: 0.65,
+    depthWrite: false,
   });
 }
 
 export function setRibFaces(geometry) {
-  // The entire rounded body stays clear; separate tube meshes carry the rims.
   geometry.clearGroups();
   geometry.addGroup(0, geometry.attributes.position.count, 0);
   return geometry;
 }
 
-export function ribRimMaterial() {
-  return new T.MeshPhysicalMaterial({
-    color: 0xffffff, roughness: 0.05, metalness: 0.1,
-    clearcoat: 1, clearcoatRoughness: 0.02,
-    transparent: true, opacity: 0.75, depthWrite: false, envMapIntensity: 2.5,
+export function ribEdgeMaterial() {
+  return new T.LineBasicMaterial({
+    color: 0xe6f5f5, transparent: true, opacity: 0.65,
+    depthWrite: false,
   });
 }
 
-// Sweep circular tubes around the already united outlines. Unlike adding a
-// cylinder to every tile, this leaves no doubled rims at L/T junctions.
-export function ribRimGeometry(body, radius = 0.008) {
-  body.computeBoundingBox();
-  const levels = [body.boundingBox.min.y + radius, body.boundingBox.max.y - radius];
-  const positions = [], normals = [], indices = [], sides = 12;
-  for (const contour of body.userData.rimContours || []) {
-    const points = contour.filter((p, i) => !i || Math.hypot(p[0] - contour[i - 1][0], p[1] - contour[i - 1][1]) > 1e-7);
-    if (points.length > 1 && Math.hypot(points[0][0] - points.at(-1)[0], points[0][1] - points.at(-1)[1]) < 1e-7) points.pop();
-    if (points.length < 3) continue;
-    for (const y of levels) {
-      const offset = positions.length / 3;
-      points.forEach((p, i) => {
-        const a = points[(i + points.length - 1) % points.length], b = points[(i + 1) % points.length];
-        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const nx = -(b[1] - a[1]) / length, nz = (b[0] - a[0]) / length;
-        for (let j = 0; j <= sides; j++) {
-          const angle = j / sides * Math.PI * 2, c = Math.cos(angle), s = Math.sin(angle);
-          positions.push(p[0] + radius * nx * c, y + radius * s, p[1] + radius * nz * c);
-          normals.push(nx * c, s, nz * c);
-        }
-      });
-      for (let i = 0; i < points.length; i++) for (let j = 0; j < sides; j++) {
-        const a = offset + i * (sides + 1) + j, b = offset + ((i + 1) % points.length) * (sides + 1) + j;
-        indices.push(a, b, a + 1, a + 1, b, b + 1);
-      }
-    }
-  }
-  const geometry = new T.BufferGeometry();
-  geometry.setAttribute('position', new T.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new T.Float32BufferAttribute(normals, 3));
-  geometry.setIndex(indices);
-  geometry.userData.rimLevels = levels;
-  geometry.userData.radius = radius;
-  return geometry;
+export function ribEdgeGeometry(body) {
+  // Feature edges come directly from the finished body. No second contour,
+  // tube sweep, corner tangent or independent height calculation is needed.
+  return new T.EdgesGeometry(body, 30);
 }
 
 export function studioEnvironment(renderer) {

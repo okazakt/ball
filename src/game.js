@@ -1,5 +1,5 @@
 import { COLS, ROWS, GAP } from './stage.js';
-import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, setRibFaces, ribRimMaterial, ribRimGeometry, studioEnvironment } from './case-visuals.js';
+import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, setRibFaces, ribEdgeMaterial, ribEdgeGeometry, ribGeometry, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
@@ -163,7 +163,6 @@ export class Game {
     this.lastRipple = -1;
     this.floorGroups = [];
     this.lidReflections = [];
-    this.ribAccents = [];
     this.activeFloor = 0;
     this.elapsed = 0;
     this.acc = 0;
@@ -223,11 +222,10 @@ export class Game {
         return [x - 3.8, z - 3.8, x + (w.axis === 'h' ? 103.8 : 3.8), z + (w.axis === 'v' ? 103.8 : 3.8)];
       });
       if (wallRects.length) {
-        const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.012, fillet: 0.038 })), wall, 0, y, 0, fi);
+        const walls = this.mesh(ribGeometry(wallRects), wall, 0, y, 0, fi);
         walls.castShadow = false;
         walls.userData.surface = 'walls';
-        this.addRibAccents(walls, fi, y);
-        this.addRibRims(walls, fi);
+        this.addRibEdges(walls, fi);
       }
       const frameRects = f.walls.filter(perimeter).map(w => {
         let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
@@ -371,36 +369,27 @@ export class Game {
             body
           );
           const halfX = vertical ? 3.8 : 48.8, halfZ = vertical ? 48.8 : 3.8;
-          const doorGeometry = solidGeometry([[-halfX, -halfZ, halfX, halfZ]], 1,
-            { bevel: 0.012, fillet: 0.038 });
+          const doorGeometry = ribGeometry([[-halfX, -halfZ, halfX, halfZ]]);
           doorGeometry.translate(0, -0.5, 0);
           const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
-          this.addRibRims(mesh, fi);
+          this.addRibEdges(mesh, fi);
           mesh.userData.dynamic = true;
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
         if (c.type === 'corner') {
           const shape = new T.Shape();
           shape.absarc(0, 0, 0.418, 0, -Math.PI / 2, true);
-          shape.absarc(0, -0.38, 0.038, -Math.PI / 2, Math.PI / 2, true);
+          shape.lineTo(0, -0.342);
           shape.absarc(0, 0, 0.342, -Math.PI / 2, 0, false);
-          shape.absarc(0.38, 0, 0.038, Math.PI, 0, true);
           shape.closePath();
-          const geometry = new T.ExtrudeGeometry(shape, { depth: 0.976, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 5, curveSegments: 24 });
+          const geometry = new T.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false, curveSegments: 24 });
           geometry.rotateX(-Math.PI / 2);
           geometry.rotateY(-((c.rotation || 0) * Math.PI) / 2);
-          geometry.translate(0, 0.012, 0);
-          geometry.userData.rimContours = [shape.getPoints(16).map(point => {
-            const p = new T.Vector3(point.x, 0, -point.y).applyAxisAngle(new T.Vector3(0, 1, 0),
-              -((c.rotation || 0) * Math.PI) / 2);
-            return [p.x, p.z];
-          })];
           setRibFaces(geometry);
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
           corner.castShadow = false;
           corner.userData.surface = 'walls';
-          this.addRibAccents(corner, fi, y);
-          this.addRibRims(corner, fi);
+          this.addRibEdges(corner, fi);
           const vertices = geometry.attributes.position.array;
           this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
             Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i))
@@ -477,27 +466,13 @@ export class Game {
     this.sync();
     this.events.loaded?.();
   }
-  addRibRims(body, fi) {
-    const rims = this.mesh(ribRimGeometry(body.geometry), ribRimMaterial(), 0, 0, 0, fi, body);
-    rims.castShadow = rims.receiveShadow = false;
-    rims.renderOrder = 2;
-    rims.userData.surface = 'rib-rims';
-  }
-  addRibAccents(rib, fi, y) {
-    const accent = (color, opacity, additive, height) => {
-      const material = new T.MeshBasicMaterial({
-        color, transparent: true, opacity, depthWrite: false,
-        blending: additive ? T.AdditiveBlending : T.NormalBlending,
-      });
-      const mesh = this.mesh(rib.geometry.clone(), material, rib.position.x, y + height, rib.position.z, fi);
-      mesh.scale.y = 0.001;
-      mesh.castShadow = mesh.receiveShadow = false;
-      mesh.renderOrder = 1;
-      mesh.userData.surface = 'rib-accent';
-      return mesh;
-    };
-    this.ribAccents.push({ fi, shadow: accent(0x02050c, 0.20, false, 0.004),
-      caustic: accent(0xb6dfff, 0.13, true, 0.007), x: rib.position.x, z: rib.position.z });
+  addRibEdges(body, fi) {
+    body.castShadow = body.receiveShadow = false;
+    const edges = new T.LineSegments(ribEdgeGeometry(body.geometry), ribEdgeMaterial());
+    edges.layers.set(fi + 1);
+    edges.renderOrder = 2;
+    edges.userData.surface = 'rib-edges';
+    body.add(edges);
   }
   markCell(cell, y, fi, color, kind) {
     const p = cellPos(cell.x, cell.z);
@@ -1067,13 +1042,6 @@ export class Game {
       }
     this.sun.position.set(4 + this.tilt.z * 12, 12 - fi * GAP, 3 + this.tilt.x * 10);
     this.sunTarget.position.set(0, -fi * GAP, 0);
-    for (const accent of this.ribAccents) {
-      const dx = (4 + this.tilt.z * 12) * 0.012, dz = (3 + this.tilt.x * 10) * 0.012;
-      accent.shadow.position.x = accent.x - dx;
-      accent.shadow.position.z = accent.z - dz;
-      accent.caustic.position.x = accent.x + dx * 0.6;
-      accent.caustic.position.z = accent.z + dz * 0.6;
-    }
     this.board.rotation.set(0, 0, 0);
     this.updateCamera();
     for (let i = 0; i < this.lidReflections.length; i++) {

@@ -8,12 +8,22 @@ const assert = require('node:assert/strict');
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
   try {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } }),
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' }),
       page = await context.newPage();
+    // Pair LOGIC_ONLY with tests/walls-browser.cjs on software-rendered CI.
+    // Keep the real animation/input/physics loop, but avoid continuously
+    // drawing WebGL between assertions; visual captures run separately.
+    if (process.env.LOGIC_ONLY) await page.addInitScript(() => {
+      window.__testNativeRaf = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = () => 0;
+    });
+    const waitForFunction = page.waitForFunction.bind(page);
+    page.waitForFunction = (fn, arg, options) => waitForFunction(fn, arg, { polling: 100, ...options });
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(process.env.TEST_URL || 'http://localhost:8000');
     await page.waitForFunction(() => window.__toukan?.game.ready, {}, { timeout: 30000 });
+    console.log('PASS: application startup');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.equal(await page.evaluate(() => window.__toukan.game.state), 'ready');
     await page.evaluate(async () => {
@@ -31,31 +41,30 @@ const assert = require('node:assert/strict');
       if (Math.abs(area(floor.geometry) - 87) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
         throw Error('Seamless wallpaper floor or floor hole missing');
       const side = walls.material;
-      const rims = walls.children.find(m => m.userData.surface === 'rib-rims');
+      const edges = walls.children.find(m => m.userData.surface === 'rib-edges');
       walls.geometry.computeBoundingBox();
-      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission < 0.9 ||
-          side.ior < 1.49 || side.ior > 1.59 || side.thickness !== 0.1 || side.roughness > 0.12 ||
-          !side.transparent || side.envMapIntensity !== 2.5 || side.roughness !== 0.02 ||
-          !rims || rims.material.opacity !== 0.75 || rims.geometry.userData.rimLevels.length !== 2 ||
+      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission > 0 ||
+          !side.transparent || side.opacity > 0.3 || side.depthWrite ||
+          !edges?.isLineSegments || !edges.material.depthTest ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
-        throw Error('Clear rib optics, top edge or height are incorrect');
+        throw Error('Simple transparent wall or outline is incorrect');
       if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)
         throw Error('PMREM studio environment missing');
-      for (const geometry of [walls.geometry, rims.geometry]) {
-        if (![...geometry.attributes.position.array, ...geometry.attributes.normal.array].every(Number.isFinite))
-          throw Error('Rounded rib contains invalid vertices or normals');
+      for (const geometry of [walls.geometry, edges.geometry]) {
+        if (![...geometry.attributes.position.array].every(Number.isFinite))
+          throw Error('Wall contains invalid vertices');
       }
-      rims.geometry.computeBoundingBox();
-      if (Math.abs(rims.geometry.boundingBox.min.y) > 1e-6 || Math.abs(rims.geometry.boundingBox.max.y - 1) > 1e-6)
-        throw Error('Tube rims extend outside the case clearance');
+      edges.geometry.computeBoundingBox();
+      if (!walls.geometry.boundingBox.min.equals(edges.geometry.boundingBox.min) ||
+          !walls.geometry.boundingBox.max.equals(edges.geometry.boundingBox.max))
+        throw Error('Wall outlines do not match the body');
       const frame = g.floorGroups[0].children.find(m => m.userData.surface === 'frame');
       if (!frame || frame.material.transparent || frame.material.transmission !== 0 ||
           frame.material.color.getHex() !== 0x269c67) throw Error('Opaque green plastic frame missing');
-      if (!g.ribAccents.length) throw Error('Rib contact shading missing');
       if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
           !g.floorGroups[2].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
         throw Error('Start and goal tile colors are incorrect');
-      const { solidGeometry, setRibFaces } = await import(new URL('./src/case-visuals.js', location.href).href);
+      const { solidGeometry, ribGeometry } = await import(new URL('./src/case-visuals.js', location.href).href);
       for (const rectangles of [
         [[0, 0, 100, 100], [100, 0, 200, 100]],
         [[0, 0, 100, 100], [100, 100, 200, 200]],
@@ -64,27 +73,17 @@ const assert = require('node:assert/strict');
         if (Math.abs(area(geometry) - 2) > 0.001) throw Error('Footprint union failed');
         geometry.dispose();
       }
-      const junction = setRibFaces(solidGeometry([
+      const junction = ribGeometry([
         [-50, -4.4, 50, 4.4], [-4.4, -4.4, 4.4, 50],
-      ], 1, { bevel: 0.006, fillet: 0.012 }));
+      ]);
       const mesh = new THREE.Mesh(junction, walls.material);
       const ray = new THREE.Raycaster(new THREE.Vector3(0.013, 2, 0.017), new THREE.Vector3(0, -1, 0));
       const tops = ray.intersectObject(mesh).filter(hit => hit.face.normal.y > 0.35);
       if (junction.groups.length !== 1 || tops.length !== 1 || Math.abs(tops[0].point.y - 1) > 1e-6)
         throw Error('Rib junction has a gap or overlapping top faces');
       junction.dispose();
-      // A rounded endpoint has no square corner in the top surface.
-      const capsule = solidGeometry([[-53.8, -3.8, 53.8, 3.8]], 1,
-        { bevel: 0.012, fillet: 0.038 });
-      const capMesh = new THREE.Mesh(capsule, walls.material);
-      ray.set(new THREE.Vector3(0.531, 2, 0.031), new THREE.Vector3(0, -1, 0));
-      if (ray.intersectObject(capMesh).some(hit => hit.point.y > 0.999))
-        throw Error('Rib end is square rather than semicircular');
-      ray.set(new THREE.Vector3(0.535, 2, 0), new THREE.Vector3(0, -1, 0));
-      if (!ray.intersectObject(capMesh).some(hit => hit.point.y > 0.999))
-        throw Error('Rounded endpoint is missing');
-      capsule.dispose();
     });
+    console.log('PASS: wall geometry and outlines');
     // Off-axis projection must pin the lid at every tilt, floor and viewport.
     for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
       await page.setViewportSize(viewport);
@@ -115,12 +114,6 @@ const assert = require('node:assert/strict');
         const lower = new T.Vector3(0, -3, 0).project(g.camera);
         if (!(floor.x > origin.x && floor.y < origin.y && lower.x > floor.x))
           throw Error('Missing depth-dependent parallax');
-        const accent = g.ribAccents[0];
-        const tiltedShadow = accent.shadow.position.clone();
-        g.tilt = { x: 0, z: 0 };
-        g.setLighting();
-        if (accent.shadow.position.distanceTo(tiltedShadow) < 0.02)
-          throw Error('Rib contact shadow does not follow lighting');
       });
     }
     await page.setViewportSize({ width: 390, height: 844 });
@@ -207,8 +200,17 @@ const assert = require('node:assert/strict');
         throw Error(`Unexpected wall restitution: ${rebound}`);
       g.load(original);
     });
+    console.log('PASS: projection, physics clearance, ceiling collisions and rebound');
     await page.waitForTimeout(700);
     assert.equal(await page.evaluate(() => window.__toukan.game.elapsed), 0);
+    if (process.env.LOGIC_ONLY) await page.evaluate(() => {
+      const g = window.__toukan.game;
+      g.renderer.clear = () => {};
+      g.renderer.render = () => {};
+      g.last = performance.now();
+      window.requestAnimationFrame = window.__testNativeRaf;
+      g.loop(performance.now());
+    });
     await page.click('#start');
     const start = await page.evaluate(() => window.__toukan.game.balls[0].body.translation().x);
     await page.keyboard.down('ArrowRight');
@@ -251,12 +253,8 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => window.__toukan.game.outcome?.won === true);
     assert.equal(await page.locator('#result-title').textContent(), '光の先に、到着。');
     await page.click('#favorite');
-    assert.equal(
-      await page.evaluate(
-        async () => (await window.__toukan.store.listStages()).filter((s) => s.favorite).length
-      ),
-      1
-    );
+    await page.waitForFunction(async () =>
+      (await window.__toukan.store.listStages()).filter(s => s.favorite).length === 1);
     await page.click('#again');
     await page.click('#start');
     await page.click('#menu');
@@ -284,15 +282,23 @@ const assert = require('node:assert/strict');
     await page.click('#redo');
     assert.equal(await page.locator('#edit-name').inputValue(), 'Undo test');
     await page.screenshot({ path: process.env.SCREENSHOT_PATH || '/tmp/toukan-editor.png' });
-    await page.evaluate(() => navigator.serviceWorker.ready);
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
-    await context.setOffline(true);
-    await page.reload();
-    await page.waitForFunction(() => window.__toukan?.game.ready);
-    await context.setOffline(false);
+    // A fresh context exercises service-worker activation/reload separately
+    // from the geometry, physics and editor assertions above.
+    const offlineContext = await browser.newContext();
+    const offlinePage = await offlineContext.newPage();
+    offlinePage.on('pageerror', e => errors.push(e.message));
+    await offlinePage.addInitScript(() => { window.requestAnimationFrame = () => 0; });
+    await offlinePage.goto(process.env.TEST_URL || 'http://localhost:8000');
+    await offlinePage.waitForFunction(() => navigator.serviceWorker.controller && window.__toukan?.game.ready,
+      undefined, { polling: 100 });
+    await offlinePage.waitForLoadState('networkidle');
+    await offlineContext.setOffline(true);
+    await offlinePage.reload();
+    await offlinePage.waitForFunction(() => window.__toukan?.game.ready, undefined, { polling: 100 });
+    await offlineContext.close();
     assert.deepEqual(errors, []);
     console.log(
-      'PASS: seamless floor/walls, start/goal colors, S/M/L corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
+      'PASS: straight floor/walls, start/goal colors, S/M/L corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
     );
   } finally {
     await browser.close();
