@@ -70,7 +70,17 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
       } else path.lineTo(p.x, p.y);
     });
     path.closePath();
-    return path;
+    // At capsule ends the two quarter circles meet. Floating-point error can
+    // leave almost identical vertices there (depending on the world position).
+    // ExtrudeGeometry treats those as tiny edges and produces broken bevels
+    // and zero-area faces. Use the same cleaned outline for extrusion and rims.
+    const outline = path.getPoints(fillet ? 8 : 1).filter((p, i, all) =>
+      !i || p.distanceTo(all[i - 1]) > 1e-7);
+    if (outline.length > 1 && outline[0].distanceTo(outline.at(-1)) < 1e-7) outline.pop();
+    const clean = path instanceof T.Shape ? new T.Shape() : new T.Path();
+    outline.forEach((p, i) => i ? clean.lineTo(p.x, p.y) : clean.moveTo(p.x, p.y));
+    clean.closePath();
+    return clean;
   };
   const shapes = outers.map(points => {
     const shape = trace(new T.Shape(), points);
