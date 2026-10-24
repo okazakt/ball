@@ -14,7 +14,7 @@ test('one-cell lift doors and posts fit the slot in every orientation',()=>{
       assert.ok(!rects.some(r=>spec.x+x>r[0]&&spec.x+x<r[2]&&spec.z+z>r[1]&&spec.z+z<r[3]));
     assert.equal(footprint(c).length,1);
     assert.ok(doorPose(spec,1).panelY+.46<0);
-    assert.ok(doorPose(spec,1).panelY+.46>-.04);
+    assert.ok(doorPose(spec,1).panelY+.46>-.16);
     assert.ok(doorPose(spec,0).postHeight>1);
     assert.ok(doorPose(spec,1).postHeight<.3);
   }
@@ -32,4 +32,9 @@ test('ramp solid fills the entire cell width, allowing seamless side-by-side pla
   const ax=Array.from({length:8},(_,i)=>a[3*i]),bx=Array.from({length:8},(_,i)=>b[3*i]);
   assert.equal(Math.max(...ax),Math.min(...bx));
   assert.equal(Math.max(...ax)-Math.min(...ax),1);
+});
+test('retracted door cap stays inside the floor channel, with safe telescoping support',()=>{
+ const spec=doorSpec({x:3,z:2,rotation:0},0),pose=doorPose(spec,1);
+ assert.ok(pose.panelY+.46<-.1);assert.ok(pose.panelY+.46>-.24);
+ assert.ok(pose.postHeight>0);
 });

@@ -25,7 +25,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
    for(let i=0;i<80;i++)g.step(1/60);
    p=b.body.translation();check((p.x-d.x)*d.dx+(p.z-d.z)*d.dz>.5,`Open door obstructed ${rotation}/${size}`);
    check(Math.abs(d.mesh.position.x-d.x)<1e-8&&Math.abs(d.mesh.position.z-d.z)<1e-8,'Door moved sideways');
-   check(d.mesh.position.y<baseY-.98&&Math.abs(d.mesh.position.y+.46+.025)<1e-6,'Stored panel is not just below the slot');
+   check(d.mesh.position.y<baseY-.98&&Math.abs(d.mesh.position.y+.46+.14)<1e-6,'Stored panel is not just below the slot');
    g.keys.clear();b.body.setTranslation({x:d.x,y:b.radius+.004,z:d.z},true);b.body.setLinvel({x:0,y:0,z:0},true);g.elapsed=7.1;
    for(let i=0;i<50;i++)g.step(1/60);
    p=b.body.translation();check(Math.abs((p.x-d.x)*d.dx+(p.z-d.z)*d.dz)>b.radius+.06,`Ball not released from apex ${rotation}/${size}`);

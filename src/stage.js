@@ -31,8 +31,7 @@ export function defaultStage() {
     { x: 0, z: 9, type: 'ramp', rotation: 2 },
     { x: 6, z: 9, type: 'goal' },
   ];
-  b.cells = [{ x: 2, z: 5, type: 'sticky' }];
-  b.walls.push(...[2, 3, 4, 5].map(x => ({ axis: 'h', x, z: 4 })));
+  // Lower chamber: perimeter only. The upper ramp connects into it.
   return {
     version: 1,
     name: '光の通り道',

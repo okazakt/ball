@@ -26,13 +26,18 @@ export function doorSpec(c, fi) {
   const x=p.x+dx*.5,z=p.z+dz*.5,halfLength=.397,halfThickness=.07;
   const halfX=dz ? halfLength : halfThickness,halfZ=dx ? halfLength : halfThickness;
   return { dx,dz,x,z,y,halfLength,halfThickness,halfX,halfZ,
-    travel:.985,postBottom:y-GAP+.08,
+    travel:1.10,postBottom:y-GAP+.08,
     groove:[x-halfX-.012,z-halfZ-.012,x+halfX+.012,z+halfZ+.012] };
 }
 export function doorPose(spec, retraction) {
   const panelY=spec.y+.5-spec.travel*retraction;
   const postTop=panelY-.46,postHeight=Math.max(.02,postTop-spec.postBottom);
   return {panelY,postHeight,postY:spec.postBottom+postHeight/2};
+}
+// Visible fraction of the sky hemisphere through a rectangular channel.
+export function slotSkyVisibility(depth, halfLength, halfWidth) {
+  if(depth<=0)return 1;
+  return 2/Math.PI*Math.atan(halfLength*halfWidth/(depth*Math.sqrt(depth*depth+halfLength*halfLength+halfWidth*halfWidth)));
 }
 export function subtractRectangle(rect, cut) {
   const [x0, z0, x1, z1] = rect;

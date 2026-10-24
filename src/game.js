@@ -1,4 +1,5 @@
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
+import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -515,6 +516,7 @@ export class Game {
       mat.map = new T.CanvasTexture(texture);
       mat.roughness = 0.13;
       mat.metalness = 0.2;
+      prepareSpatialMaterial(mat);
       const mesh = this.mesh(
         new T.SphereGeometry(radius, 24, 16),
         mat,
@@ -524,7 +526,7 @@ export class Game {
         fi
       );
       const light = new T.PointLight(['#ffbb77', '#b4f6c7', '#fff2b6'][i], 1.3, 2.2, 1.4);
-      light.layers.set(fi + 1);
+      light.layers.set(1);light.layers.enable(2);light.userData.baseIntensity=1.3;
       mesh.add(light);
       this.balls.push({
         body,
@@ -538,6 +540,10 @@ export class Game {
         prevSpeed: 0,
       });
     });
+    this.movingLights=[];
+    this.board.traverse(light=>{if(light.isPointLight||light.isSpotLight){
+      light.userData.spatialPosition=new T.Vector3();light.userData.spatialTarget=new T.Vector3();this.movingLights.push(light);
+    }});
     this.updateWallSettings({});
     this.sync();
     this.warmupRenderVariants();
@@ -637,7 +643,7 @@ export class Game {
     const collider=this.world.createCollider(this.R.ColliderDesc.cuboid(spec.halfX,.46,spec.halfZ).setFriction(.1).setRestitution(0),body);
     const geometry=solidGeometry([[-spec.halfX*100,-spec.halfZ*100,spec.halfX*100,spec.halfZ*100]],.92,
       {bevel:.012,bevelOffset:-.012,fillet:.018}).translate(0,-.46,0);
-    const mesh=this.mesh(geometry,this.casePlastic(),spec.x,pose.panelY,spec.z,fi);
+    const mesh=this.mesh(geometry,prepareSpatialMaterial(this.casePlastic()),spec.x,pose.panelY,spec.z,fi);
     mesh.userData.dynamic=true;mesh.userData.surface='door';mesh.castShadow=false;
     const postBody=this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(spec.x,pose.postY,spec.z));
     const postCollider=this.world.createCollider(this.R.ColliderDesc.cylinder(pose.postHeight/2,.055).setFriction(.1).setRestitution(0),postBody);
@@ -666,7 +672,11 @@ export class Game {
       for(const extra of [0,.12,.24,.4])for(const side of [preferred,-preferred]) {
         if(released)break;
         const distance=side*(door.halfThickness+r+.015+extra)-normal;
-        const target={x:p.x+door.dx*distance,y:p.y,z:p.z+door.dz*distance};
+        const floorY=-b.floor*GAP+r;
+        // A ball can settle a few millimetres into the open slot. Lift only
+        // that small rim sag before testing an otherwise free escape side.
+        const targetY=p.y>floorY-.04&&p.y<floorY+.01?Math.max(p.y,floorY+.002):p.y;
+        const target={x:p.x+door.dx*distance,y:targetY,z:p.z+door.dz*distance};
         if(Math.abs(target.x)>COLS/2-r || Math.abs(target.z)>ROWS/2-r)continue;
         let blocked=false;
         this.world.intersectionsWithShape(target,b.body.rotation(),new this.R.Ball(r-.006),other=>{
@@ -1176,8 +1186,7 @@ export class Game {
       const nextFloor = bottom < -.32 ? 1 : bottom > -.12 ? 0 : b.floor;
       if (nextFloor !== b.floor) {
         b.floor = nextFloor;
-        b.mesh.layers.set(nextFloor+1); b.light.layers.set(nextFloor+1);
-        b.mesh.material.envMapIntensity = this.stage.floors[nextFloor].dark ? .015 : .22;
+        b.mesh.layers.set(nextFloor+1);
       }
       const f = this.stage.floors[b.floor];
       const near = f.cells.filter((c) => {
@@ -1212,7 +1221,7 @@ export class Game {
         b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
         b.collider.setSensor(true);
         b.mesh.visible = false;
-        b.light.intensity = 0;
+        b.light.intensity = 0; b.light.userData.baseIntensity=0;
         this.sound.tone(0.7, 'alert');
       }
     }
@@ -1268,6 +1277,17 @@ export class Game {
     this.sunTarget.position.set(0, -fi * GAP, 0);
     this.board.rotation.set(0, 0, 0);
     this.updateCamera();
+    this.board.updateMatrixWorld(true);
+    for(const light of this.movingLights){
+      light.getWorldPosition(light.userData.spatialPosition);
+      if(light.isSpotLight)light.target.getWorldPosition(light.userData.spatialTarget);
+    }
+    for(const b of this.balls)updateSpatialMaterial(this,b.mesh,exposureAt(b.mesh.position.y,b.radius));
+    for(const door of this.doors){
+      const top=door.mesh.position.y+.46;
+      const sky=slotSkyVisibility(-top,door.halfLength+.012,door.halfThickness+.012);
+      updateSpatialMaterial(this,door.mesh,exposureAt(top,.04)*sky,2);
+    }
     for (let i = 0; i < this.lidReflections.length; i++) {
       const reflection = this.lidReflections[i];
       reflection.visible = i === fi;
@@ -1291,6 +1311,10 @@ export class Game {
     // separately so upper-floor sunlight never illuminates an unreached dark floor.
     for (let fi = this.stage.floors.length - 1; fi >= this.viewFloor; fi--) {
       this.camera.layers.set(fi + 1);
+      for(const b of this.balls){
+        const upper=exposureAt(b.mesh.position.y,b.radius);
+        b.light.intensity=(b.light.userData.baseIntensity??1.3)*(fi===0?upper:1-upper);
+      }
       if (this.wallSettings.resinDensity > 0) {
         for (const mesh of hidden) mesh.visible = false;
         this.renderer.setRenderTarget(this.wallBackgroundTarget);
@@ -1468,11 +1492,11 @@ export class Game {
         const f = v[i++],
           done = v[i++];
         b.mesh.layers.set(f + 1);
-        b.light.layers.set(f + 1);
+
         b.displayFloor = f;
         b.displayDone = done;
         b.mesh.visible = !done;
-        b.light.intensity = done ? 0 : 1.3;
+        b.light.intensity = done ? 0 : 1.3; b.light.userData.baseIntensity=done?0:1.3;
       }
       for (const e of this.enemies) {
         e.g.position.x = v[i++];

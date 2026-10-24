@@ -109,3 +109,9 @@ test('unfinished editor layouts can be checked without requiring a start or goal
   assert.throws(() => validateStage(s));
   assert.doesNotThrow(() => validateStage(s,{allowIncomplete:true}));
 });
+
+test('initial lower chamber contains only its perimeter and the shared ramp',()=>{
+ const s=defaultStage();assert.deepEqual(s.floors[1].cells,[]);
+ assert.ok(s.floors[1].walls.every(w=>w.axis==='h'?[0,11].includes(w.z):[0,8].includes(w.x)));
+ assert.ok(s.floors[0].cells.some(c=>c.type==='ramp'));
+});

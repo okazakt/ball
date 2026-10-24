@@ -20,9 +20,8 @@ const fs = require('node:fs');
       g.warmupRenderVariants=()=>{};
       check(g.floorGroups.length===2 && g.lidReflections.length===1,'Exactly two floors and one outer lid required');
       const upperFloor=g.floorGroups[0].children.find(m=>m.userData.surface==='floor');
-      const lowerWall=g.floorGroups[1].children.find(m=>m.userData.surface==='walls');
-      upperFloor.geometry.computeBoundingBox();lowerWall.geometry.computeBoundingBox();
-      check(Math.abs(upperFloor.position.y+upperFloor.geometry.boundingBox.min.y-lowerWall.position.y-lowerWall.geometry.boundingBox.max.y)<1e-6,'Lower walls must meet upper floor underside');
+      upperFloor.geometry.computeBoundingBox();
+      check(Math.abs(upperFloor.position.y+upperFloor.geometry.boundingBox.min.y+.24)<1e-6,'Upper slab underside must remain at -.24');
       for(const size of ['S','M']) {
         g.load({...original,size},false);g.state='playing';
         const b=g.balls[0];g.setLighting();const cameraY=g.camera.position.y;
@@ -44,7 +43,7 @@ const fs = require('node:fs');
       g.keys.clear();check(b.body.translation().x<d.x-.35,'Lower ball passed through the door post');
       b.body.setTranslation({x:3,y:.42,z:4.8},true);b.body.setLinvel({x:0,y:0,z:0},true);b.floor=0;g.elapsed=4.1;
       for(let i=0;i<60;i++)g.step(1/60);
-      check(d.slide>.99&&Math.abs(d.mesh.position.y+.485)<1e-6,'Door did not retract below the slot');
+      check(d.slide>.99&&Math.abs(d.mesh.position.y+.6)<1e-6,'Door did not retract below the slot');
       check(Math.abs(d.mesh.position.x-d.x)<1e-6&&Math.abs(d.mesh.position.z-d.z)<1e-6,'Lift door moved sideways');
       // A creator may start and finish in the lower layer; camera still stays above.
       const lower=structuredClone(original);lower.balls=[{x:6,z:8,floor:1}];lower.floors[1].cells.push({x:6,z:9,type:'goal'});
@@ -55,7 +54,7 @@ const fs = require('node:fs');
       // Replay vertical door travel without changing viewpoint.
       g.load(original,false);d=g.doors[0];g.recordFrame();g.setDoorVisual(d,1);d.open=true;g.recordFrame();
       g.outcome={floor:1,ballIndex:0,reason:'test',won:false};g.playReplay(true);g.updateReplay(.1);
-      check(g.viewFloor===0&&d.slide>.99&&Math.abs(d.mesh.position.y+.485)<1e-6,'Replay changed the camera or lost vertical door movement');
+      check(g.viewFloor===0&&d.slide>.99&&Math.abs(d.mesh.position.y+.6)<1e-6,'Replay changed the camera or lost vertical door movement');
       g.load(original,false);g.sync();g.renderScene();document.querySelector('#start-panel').hidden=true;
       check(JSON.stringify(g.wallSettings)===JSON.stringify(settings),'Wall tuning changed');
       return {layers:g.stage.floors.length,gap:GAP,ramps:g.ramps.length,doors:g.doors.length};
