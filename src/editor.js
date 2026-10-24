@@ -3,7 +3,7 @@ const labels = {
   wall: '直線壁',
   corner: '曲面壁',
   erase: '消しゴム',
-  ball: '玉',
+  ball: 'スタート／玉',
   hole: '穴',
   goal: 'ゴール',
   sticky: '粘着床',
@@ -15,7 +15,7 @@ const labels = {
 };
 const colors = {
   hole: '#050a0e',
-  goal: '#b4f6c7',
+  goal: '#ef334b',
   sticky: '#b068cc',
   door: '#ffb775',
   switch: '#f5dc97',
@@ -272,6 +272,8 @@ export class Editor {
     }
     if (this.fi === 0)
       for (const b of this.stage.balls) {
+        c.fillStyle = '#176bff';
+        c.fillRect(b.x * 60 + 1, b.z * 60 + 1, 58, 58);
         c.fillStyle = colors.ball;
         c.beginPath();
         c.arc(b.x * 60 + 30, b.z * 60 + 30, 11, 0, Math.PI * 2);
