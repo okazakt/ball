@@ -17,6 +17,7 @@ export function inspectDraw(renderer, mesh) {
   return {
     floor: mesh.userData.wallFloor + 1,
     surface: mesh.userData.surface || 'door',
+    triangleOrder: mesh.geometry.userData.wallTriangleOrder || 'unspecified',
     linked: !!program && gl.getProgramParameter(program, gl.LINK_STATUS),
     shader: mesh.material.customProgramCacheKey(),
     sourceHash: (hash >>> 0).toString(16),

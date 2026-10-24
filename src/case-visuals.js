@@ -139,6 +139,23 @@ export const WALL_DEFAULTS = Object.freeze({
   topFusion: 0.4, wallThickness: 1, bottomFusion: 0.4, resinDensity: 0.5,
 });
 
+// The off-axis camera always looks straight down (Game.updateCamera), so
+// camera-space depth depends only on height, even while the board appears tilted.
+// Transparent meshes are sorted as objects by Three.js, not as triangles.
+// Draw their far/lower faces first, leaving the near roof/bevel/weld edges last.
+// This changes only the index order: positions, normals and collision faces stay intact.
+export function orderWallFacesByHeight(geometry) {
+  const positions = geometry.attributes.position;
+  const triangles = Array.from({ length: positions.count / 3 }, (_, i) => i);
+  const height = triangles.map(i => positions.getY(i * 3) + positions.getY(i * 3 + 1) + positions.getY(i * 3 + 2));
+  triangles.sort((a, b) => height[a] - height[b] || a - b);
+  const order = [];
+  for (const triangle of triangles) order.push(triangle * 3, triangle * 3 + 1, triangle * 3 + 2);
+  geometry.setIndex(order);
+  geometry.userData.wallTriangleOrder = 'bottom-to-top';
+  return geometry;
+}
+
 // A single united extrusion preserves the rounded outline at all junctions.
 export function wallGeometry(rectangles, settings = WALL_DEFAULTS) {
   const thickness = settings.wallThickness ?? 1;
@@ -152,7 +169,7 @@ export function wallGeometry(rectangles, settings = WALL_DEFAULTS) {
     cornerFillet: settings.cornerRadius * 0.076 * thickness, outlineSegments: 16,
   });
   geometry.userData.wallThickness = thickness;
-  return setRibFaces(geometry);
+  return setRibFaces(orderWallFacesByHeight(geometry));
 }
 
 export function curvedWallGeometry(rotation, settings = WALL_DEFAULTS) {
@@ -177,7 +194,7 @@ export function curvedWallGeometry(rotation, settings = WALL_DEFAULTS) {
   geometry.translate(0, bevel, 0);
   smoothMoldedNormals(geometry);
   geometry.userData.wallThickness = thickness;
-  return setRibFaces(geometry);
+  return setRibFaces(orderWallFacesByHeight(geometry));
 }
 
 // Bake distance to the OUTER boundary of the united top footprint. Internal

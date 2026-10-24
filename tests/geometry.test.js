@@ -179,3 +179,34 @@ test('wall thickness changes real geometry without moving centerlines or losing 
     }
   }
 });
+
+test('wall index order draws lower faces before the roof without altering any triangle', async () => {
+  const { wallGeometry, curvedWallGeometry, WALL_DEFAULTS } = await import('../src/case-visuals.js');
+  const shapes = [
+    [[-103.8, -3.8, 3.8, 3.8], [-3.8, -3.8, 3.8, 103.8]],
+    [[-103.8, -3.8, 103.8, 3.8], [-3.8, -103.8, 3.8, 103.8]],
+  ];
+  for (const wallThickness of [.5, 1, 2]) {
+    const settings = { ...WALL_DEFAULTS, wallThickness, cornerRadius: .88 };
+    const geometries = [...shapes.map(shape => wallGeometry(shape, settings)),
+      ...[0, 1, 2, 3].map(rotation => curvedWallGeometry(rotation, settings))];
+    for (const geometry of geometries) {
+      const positions = geometry.attributes.position, indices = geometry.index.array;
+      assert.equal(indices.length, positions.count);
+      assert.equal(new Set(indices).size, positions.count);
+      assert.equal(geometry.userData.wallTriangleOrder, 'bottom-to-top');
+      let previous = -Infinity;
+      for (let i = 0; i < indices.length; i += 3) {
+        // Every original face must retain its vertices and winding.
+        assert.equal(indices[i] % 3, 0);
+        assert.equal(indices[i + 1], indices[i] + 1);
+        assert.equal(indices[i + 2], indices[i] + 2);
+        const height = (positions.getY(indices[i]) + positions.getY(indices[i + 1]) + positions.getY(indices[i + 2])) / 3;
+        assert.ok(height >= previous - 1e-9);
+        previous = height;
+      }
+      assert.ok(previous > .99, 'Roof must be drawn last');
+      geometry.dispose();
+    }
+  }
+});
