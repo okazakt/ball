@@ -26,3 +26,17 @@ test('ramps open both upper cells and fill a wedge extending to the lower base',
   assert.ok(Math.abs(hull[1]+GAP+.025)<1e-6);
   assert.ok(Math.abs(hull[6*3+1]-.005)<1e-6);
 });
+test('door shifts toward the travel-side wall with fixed-width clearance',()=>{
+  for(let rotation=0;rotation<4;rotation++){
+    const c={x:3,z:5,rotation},s=doorSpec(c,0),p={x:-.5,z:0};
+    assert.ok(Math.abs((s.x-p.x)*s.dx+(s.z-p.z)*s.dz)<1e-10);
+    assert.ok(Math.abs(Math.hypot(s.x-p.x,s.z-p.z)-.332)<1e-10);
+    assert.ok(Math.abs(.5-.332-.06-.088-.02)<1e-10);
+  }
+});
+test('ramp solid fills the entire cell width, allowing seamless side-by-side placement',()=>{
+  const a=rampHull({x:3,z:5,rotation:2}),b=rampHull({x:4,z:5,rotation:2});
+  const ax=Array.from({length:8},(_,i)=>a[3*i]),bx=Array.from({length:8},(_,i)=>b[3*i]);
+  assert.equal(Math.max(...ax),Math.min(...bx));
+  assert.equal(Math.max(...ax)-Math.min(...ax),1);
+});

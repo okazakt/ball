@@ -1,5 +1,11 @@
 // Intentionally independent of release/cache versions: updates retain user tuning.
 export const WALL_SETTINGS_KEY = 'toukan.wall-settings';
+export const FIXED_WALL_SETTINGS = Object.freeze({
+  edgeWidth: .35, edgeBrightness: 3.82, sideGloss: 2.23, bottomEdge: .91,
+  centerOpacity: .34, taperAngle: .4, cornerRadius: 1, lightAngle: 0,
+  specularSharpness: 10.58, resinTint: .81, topFusion: .51,
+  wallThickness: 2, bottomFusion: .89, resinDensity: .25,
+});
 const limits = {
   edgeWidth: [.05, .5], edgeBrightness: [0, 5], sideGloss: [0, 3],
   bottomEdge: [0, 1], centerOpacity: [0, .5], taperAngle: [0, .8],

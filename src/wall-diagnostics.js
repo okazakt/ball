@@ -79,6 +79,7 @@ export function wallDiagnostics(game, version) {
     framebuffer: { width: gl.drawingBufferWidth, height: gl.drawingBufferHeight },
     tilt: { ...game.tilt },
     settings: { ...game.wallSettings },
+    settingsMode: 'fixed',
     saved,
     draws,
     pixelProbe: probeWallPixels(game),

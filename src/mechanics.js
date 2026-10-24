@@ -3,9 +3,10 @@ export const DIRECTIONS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 export const direction = c => DIRECTIONS[c.rotation ?? 0];
 export const cellCenter = (x, z) => ({ x: x - (COLS - 1) / 2, z: z - (ROWS - 1) / 2 });
 export const MARKER_EDGE = .46, MARKER_BUMP_RADIUS = .035;
+export const HOLE_RADIUS = .48;
 export function insideGoal(p, radius, cell, fi) {
   const q = cellCenter(cell.x, cell.z);
-  const inset = MARKER_EDGE - MARKER_BUMP_RADIUS - radius;
+  const inset = MARKER_EDGE - MARKER_BUMP_RADIUS;
   return Math.abs(p.x-q.x) < inset && Math.abs(p.z-q.z) < inset
     && Math.abs(p.y-(-fi*GAP+radius)) < .06;
 }
@@ -17,7 +18,11 @@ export function sharedEdge(a, b) {
   return a.x === b.x ? { axis: 'h', x: a.x, z: Math.max(a.z, b.z) } : { axis: 'v', x: Math.max(a.x, b.x), z: a.z };
 }
 export function doorSpec(c, fi) {
-  const [dx, dz] = direction(c), p = cellCenter(c.x, c.z), y = -fi * GAP;
+  const [dx, dz] = direction(c), center = cellCenter(c.x, c.z), y = -fi * GAP;
+  // Fixed wall half-width (.088), door half-width (.06), and .02 clearance.
+  // Place the door along the left edge of its travel direction.
+  const offset = .5 - .088 - .06 - .02;
+  const p = { x: center.x + dz * offset, z: center.z - dx * offset };
   const postBottom = fi === 0 ? -GAP + .08 : y - .18, postTop = y + .12;
   return { dx, dz, x: p.x, z: p.z, y,
     postHeight: postTop - postBottom, postY: (postTop + postBottom) / 2,
@@ -47,7 +52,7 @@ export function floorRectangles(stage, fi) {
 export function rampHull(c) {
   const [dx,dz] = direction(c), p = cellCenter(c.x,c.z), px = -dz, pz = dx;
   const points = [];
-  for (const top of [false,true]) for (const [along, across] of [[-.5,-.48],[-.5,.48],[1.5,.48],[1.5,-.48]])
+  for (const top of [false,true]) for (const [along, across] of [[-.5,-.5],[-.5,.5],[1.5,.5],[1.5,-.5]])
     points.push(p.x+dx*along+px*across, top ? (along < 0 ? -GAP+.005 : .005) : -GAP-.025, p.z+dz*along+pz*across);
   return new Float32Array(points);
 }

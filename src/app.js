@@ -81,7 +81,7 @@ const game = new Game($('#viewport'), sound, {
 const wallPanel = document.createElement('details');
 wallPanel.id = 'wall-controls';
 const wallSummary = document.createElement('summary');
-wallSummary.textContent = '壁マテリアル調整';
+wallSummary.textContent = '壁の固定値・描画診断';
 wallPanel.append(wallSummary);
 const wallFields = document.createElement('div');
 wallFields.className = 'wall-fields';
@@ -137,7 +137,7 @@ for (const [key, title, min, max] of [
   output.htmlFor = `wall-${key}`;
   const input = document.createElement('input');
   Object.assign(input, { id: `wall-${key}`, type: 'range', min, max, step: 0.01,
-    value: game.wallSettings[key] });
+    value: game.wallSettings[key], disabled: true });
   output.value = Number(input.value).toFixed(2);
   input.addEventListener('input', () => {
     output.value = Number(input.value).toFixed(2);

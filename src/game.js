@@ -1,6 +1,6 @@
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, insideGoal } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
-import { loadWallSettings, saveWallSettings } from './wall-settings.js';
+import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
 import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_DEFAULTS, applyWallSettings, wallGeometry, curvedWallGeometry, prepareClearWall, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
@@ -29,15 +29,14 @@ export class Game {
     this.ready = false;
     this.gyro = false;
     this.quest = true;
-    this.wallSettings = loadWallSettings(WALL_DEFAULTS);
+    this.wallSettings = { ...FIXED_WALL_SETTINGS };
     this.wallMaterials = new Set();
     this.wallColliders = [];
     this.setupInput();
   }
   updateWallSettings(patch) {
     const oldRadius = this.wallSettings.cornerRadius, oldThickness = this.wallSettings.wallThickness;
-    Object.assign(this.wallSettings, patch);
-    saveWallSettings(this.wallSettings);
+    Object.assign(this.wallSettings, FIXED_WALL_SETTINGS);
     for (const material of this.wallMaterials) applyWallSettings(material, this.wallSettings);
     if (oldThickness !== this.wallSettings.wallThickness) this.updateWallColliders();
     if (oldRadius !== this.wallSettings.cornerRadius || oldThickness !== this.wallSettings.wallThickness) {
@@ -236,6 +235,7 @@ export class Game {
     this.enemies = [];
     this.doors = [];
     this.ramps = [];
+    this.goalSurfaces = [];
     this.effects = [];
     this.ripples = [];
     this.lastRipple = -1;
@@ -285,9 +285,7 @@ export class Game {
         const positions = floorGeo.attributes.position, uvs = floorGeo.attributes.uv;
         for (let i = 0; i < positions.count; i++)
           uvs.setXY(i, positions.getX(i) / COLS + 0.5, 0.5 - positions.getZ(i) / ROWS);
-        const floorMat = new T.MeshStandardMaterial({
-          color: 0xffffff, map: spaceTexture(), roughness: 1, metalness: 0, envMapIntensity: 0,
-        });
+        const floorMat = this.floorMaterial(fi);
         const floorMesh = this.mesh(floorGeo, floorMat, 0, y - 0.24, 0, fi);
         floorMesh.userData.surface = 'floor';
       }
@@ -318,8 +316,9 @@ export class Game {
           transmission: 0, opacity: 1, transparent: false,
           clearcoat: 1, clearcoatRoughness: 0.03, ior: 1.52, envMapIntensity: 2.0,
         });
-        const frame = this.mesh(solidGeometry(frameRects, LID_Y, { bevel: 0.025, fillet: 0.045 }),
-          frameMat, 0, y, 0, fi);
+        // Extend through the slab: upper/lower exterior faces share one plane.
+        const frame = this.mesh(solidGeometry(frameRects, LID_Y + FLOOR_THICKNESS, { bevel: 0.025, fillet: 0.045 }),
+          frameMat, 0, y - FLOOR_THICKNESS, 0, fi);
         frame.userData.surface = 'frame';
         frame.castShadow = false;
       }
@@ -359,8 +358,9 @@ export class Game {
       for (const c of f.cells) {
         const p = cellPos(c.x, c.z);
         if (c.type === 'hole') {
+          this.createHoleFloor(c, y, fi);
           const ring = this.mesh(
-            new T.TorusGeometry(0.52, 0.018, 6, 32),
+            new T.TorusGeometry(HOLE_RADIUS + .018, .018, 8, 64),
             this.material(0xffc36e, false),
             p.x,
             y + 0.01,
@@ -375,7 +375,7 @@ export class Game {
           )
             bottom++;
           const depth = (bottom - fi) * GAP;
-          const beam = new T.SpotLight(0xbceeff, 1.6, depth + 1, 0.15, 0.4, 1);
+          const beam = new T.SpotLight(0xbceeff, .35, depth + 1, .35, 1, 2);
           beam.position.set(p.x, y + 0.5, p.z);
           beam.target.position.set(p.x, y - depth, p.z);
           beam.layers.disableAll();
@@ -383,12 +383,23 @@ export class Game {
           beam.userData.persistentLight = true;
           beam.target.userData.persistentLight = true;
           this.board.add(beam, beam.target);
+          const poolCanvas = document.createElement('canvas'); poolCanvas.width = poolCanvas.height = 128;
+          const poolContext = poolCanvas.getContext('2d');
+          const gradient = poolContext.createRadialGradient(64,64,0,64,64,64);
+          gradient.addColorStop(0,'rgba(140,180,205,.16)');
+          gradient.addColorStop(.5,'rgba(100,145,180,.08)');
+          gradient.addColorStop(1,'rgba(80,120,160,0)');
+          poolContext.fillStyle = gradient; poolContext.fillRect(0,0,128,128);
+          const pool = this.mesh(new T.PlaneGeometry(1.5,1.5),new T.MeshBasicMaterial({
+            map:new T.CanvasTexture(poolCanvas),transparent:true,depthWrite:false,
+            blending:T.AdditiveBlending }),p.x,y-depth+.006,p.z,bottom);
+          pool.rotation.x = -Math.PI/2; pool.userData.persistentLight = true;
           const glow = this.mesh(
-            new T.CylinderGeometry(0.35, 0.43, depth, 4, 1, true),
+            new T.CylinderGeometry(HOLE_RADIUS, .65, depth, 48, 1, true),
             new T.MeshBasicMaterial({
               color: 0xb1e9f4,
               transparent: true,
-              opacity: 0.035,
+              opacity: 0.012,
               depthWrite: false,
               side: T.DoubleSide,
               blending: T.AdditiveBlending,
@@ -529,6 +540,32 @@ export class Game {
     return new T.MeshPhysicalMaterial({ color: 0x269c67, roughness: .1, metalness: 0,
       clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
   }
+  floorMaterial(fi) {
+    let map = spaceTexture();
+    if (fi > 0) {
+      // Indirect, scattered light below the opaque upper slab.
+      const canvas = document.createElement('canvas');
+      canvas.width = map.image.width; canvas.height = map.image.height;
+      const ctx = canvas.getContext('2d');
+      ctx.filter = 'blur(12px)'; ctx.drawImage(map.image, 0, 0);
+      map.dispose(); map = new T.CanvasTexture(canvas); map.encoding = T.sRGBEncoding;
+    }
+    return new T.MeshStandardMaterial({ color: fi ? 0x606874 : 0xffffff,
+      map, roughness: 1, metalness: 0, envMapIntensity: 0 });
+  }
+  createHoleFloor(c, y, fi) {
+    const p = cellPos(c.x,c.z), shape = new T.Shape();
+    shape.moveTo(-.5,-.5); shape.lineTo(.5,-.5); shape.lineTo(.5,.5); shape.lineTo(-.5,.5); shape.closePath();
+    const hole = new T.Path(); hole.absarc(0,0,HOLE_RADIUS,0,2*Math.PI,true); shape.holes.push(hole);
+    const geometry = new T.ExtrudeGeometry(shape,{depth:FLOOR_THICKNESS,bevelEnabled:false,curveSegments:32})
+      .rotateX(-Math.PI/2).translate(0,-FLOOR_THICKNESS,0);
+    const positions = geometry.attributes.position, uv = geometry.attributes.uv;
+    for(let i=0;i<positions.count;i++) uv.setXY(i,(positions.getX(i)+p.x)/COLS+.5,.5-(positions.getZ(i)+p.z)/ROWS);
+    const mesh = this.mesh(geometry,this.floorMaterial(fi),p.x,y,p.z,fi);
+    mesh.userData.surface = 'hole-floor';
+    this.world.createCollider(this.R.ColliderDesc.trimesh(positions.array,
+      Uint32Array.from({length:positions.count},(_,i)=>i)).setTranslation(p.x,y,p.z).setFriction(.1).setRestitution(.1));
+  }
   createRamp(c) {
     const vertices = rampHull(c), geometry = new T.BufferGeometry();
     geometry.setAttribute('position', new T.BufferAttribute(vertices, 3));
@@ -536,7 +573,13 @@ export class Game {
     const center = new T.Vector3();
     for (let i=0;i<8;i++) center.add(new T.Vector3().fromArray(vertices,i*3));
     center.multiplyScalar(1/8);
-    for (let face of faces) {
+    const [dx,dz] = direction(c);
+    for (let [index, face] of faces.entries()) {
+      // Adjacent ramps share their full-width top; no internal side face/ridge.
+      const across = index === 3 ? 1 : index === 5 ? -1 : 0;
+      if (across && this.stage.floors[0].cells.some(other => other.type === 'ramp'
+        && (other.rotation ?? 0) === (c.rotation ?? 0)
+        && other.x === c.x - dz*across && other.z === c.z + dx*across)) continue;
       const a = new T.Vector3().fromArray(vertices,face[0]*3), b = new T.Vector3().fromArray(vertices,face[1]*3), d = new T.Vector3().fromArray(vertices,face[2]*3);
       if (b.clone().sub(a).cross(d.clone().sub(a)).dot(a.clone().sub(center)) < 0) face = [...face].reverse();
       indices.push(face[0],face[1],face[2],face[0],face[2],face[3]);
@@ -563,6 +606,12 @@ export class Game {
     const post = this.mesh(new T.CylinderGeometry(.065,.065,spec.postHeight,16),this.casePlastic(),spec.x,spec.postY,spec.z,1);
     post.userData.dynamic = true; post.userData.surface = 'door-post'; post.castShadow = false;
     this.doors.push({ c, fi, ...spec, body, collider, postCollider, mesh, post, slide: 0, nextSlide: 0, open: false });
+    // An unlit bottom to the narrow channel occludes the lower floor pattern.
+    const [x0,z0,x1,z1] = spec.groove;
+    const shade = this.mesh(new T.PlaneGeometry(x1-x0,z1-z0),
+      new T.MeshBasicMaterial({color:0x010203,side:T.DoubleSide}),
+      (x0+x1)/2,spec.y-FLOOR_THICKNESS-.005,(z0+z1)/2,fi);
+    shade.rotation.x = -Math.PI/2; shade.userData.surface = 'door-groove';
   }
   setDoorVisual(door, slide) {
     door.slide = slide;
@@ -576,6 +625,11 @@ export class Game {
     tile.rotation.x = -Math.PI / 2;
     tile.castShadow = tile.receiveShadow = false;
     tile.userData.surface = kind;
+    if (kind === 'goal') {
+      const collider = this.world.createCollider(this.R.ColliderDesc.cuboid(.46,.002,.46)
+        .setTranslation(p.x,y+.002,p.z).setFriction(.1).setRestitution(0));
+      this.goalSurfaces.push({cell,fi,collider,y:y+.004});
+    }
     // Rounded, low ridges on all four edges. The same radius is used by Rapier.
     for (const axis of ['x', 'z']) for (const sign of [-1, 1]) {
       const x = p.x + (axis === 'z' ? sign * MARKER_EDGE : 0);
@@ -1094,7 +1148,12 @@ export class Game {
           this.events.status?.('磁力ネット！ シェイク連打で脱出');
         }
       }
-      if (f.cells.some((c) => c.type === 'goal' && insideGoal(p, b.radius, c, b.floor)) && b.sticky <= 0) {
+      if (this.goalSurfaces.some(goal => {
+        if (goal.fi !== b.floor || !insideGoal(p,b.radius,goal.cell,b.floor)) return false;
+        const contact = b.collider.contactCollider(goal.collider,.001);
+        return contact && contact.distance <= .001 && contact.normal2.y > .9
+          && Math.abs(contact.point2.y-goal.y) < .002;
+      }) && b.sticky <= 0) {
         b.done = true;
         b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
         b.collider.setSensor(true);
