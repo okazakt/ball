@@ -271,6 +271,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
   material.userData.wallDistance = { value: material.alphaMap };
   material.userData.wallShapeThickness = { value: geometry?.userData.wallThickness ?? settings.wallThickness };
   material.userData.wallContact = { value: 1 };
+  material.userData.wallDiagnosticMode = { value: 0 };
   material.userData.wallBottomContact = { value: 1 };
   material.userData.wallBackground = { value: null };
   material.userData.wallResolution = { value: new T.Vector2(1, 1) };
@@ -283,6 +284,7 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
     shader.uniforms.wallTexel = material.userData.wallTexel;
     shader.uniforms.wallShapeThickness = material.userData.wallShapeThickness;
     shader.uniforms.wallContact = material.userData.wallContact;
+    shader.uniforms.wallDiagnosticMode = material.userData.wallDiagnosticMode;
     for (const key of ['wallBottomContact', 'wallBackground', 'wallResolution']) shader.uniforms[key] = material.userData[key];
     shader.vertexShader = `attribute vec2 wallPlanar; attribute vec2 wallOutward; attribute float wallHeight;
       uniform float taperAngle; uniform float wallThickness; uniform float wallShapeThickness; varying vec2 wallUV; varying vec2 wallDir; varying float wallY; varying float wallSide;\n` + shader.vertexShader;
@@ -298,8 +300,15 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       wallUV = wallPlanar; wallY = wallHeight; wallDir = wallOutward;
       wallSide = 1.0 - abs(normal.y);
     `);
-    shader.fragmentShader = `uniform sampler2D wallDistance; uniform vec2 wallTexel;
-      uniform sampler2D wallBackground; uniform vec2 wallResolution;
+    shader.fragmentShader = `precision highp sampler2D; precision highp samplerCube;
+      uniform highp sampler2D wallDistance; uniform vec2 wallTexel;
+      uniform highp sampler2D wallBackground; uniform vec2 wallResolution;
+      uniform float wallDiagnosticMode;
+      bool wallValidRadiance(vec3 v) {
+        return all(greaterThanEqual(v, vec3(0.0))) && all(lessThanEqual(v, vec3(65504.0)));
+      }
+      float wallSafeChannel(float v) { return v >= 0.0 && v <= 65504.0 ? v : 0.0; }
+      vec3 wallSafeRadiance(vec3 v) { return vec3(wallSafeChannel(v.r), wallSafeChannel(v.g), wallSafeChannel(v.b)); }
       uniform float bottomFusion; uniform float resinDensity; uniform float wallBottomContact;
       uniform float lightAngle; uniform float specularSharpness; uniform float resinTint; uniform float cornerRadius;
       uniform float topFusion; uniform float wallThickness; uniform float wallShapeThickness; uniform float wallContact;
@@ -347,6 +356,8 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       float bottomAlpha = clamp(bottomFusion * wallBottomContact * bottomBand * (0.3 + 0.55 * facing), 0.0, 0.9);
       float coverage = 1.0 - (1.0 - bodyAlpha) * (1.0 - glare) * (1.0 - edgeAlpha) * (1.0 - rootAlpha) * (1.0 - fusionAlpha) * (1.0 - bottomAlpha);
       vec3 surfaceReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
+      bool wallBadReflection = !wallValidRadiance(surfaceReflection);
+      surfaceReflection = wallSafeRadiance(surfaceReflection);
       vec3 resinColor = mix(vec3(1.0), vec3(0.6, 0.91, 1.0), resinTint);
       outgoingLight = mix(resinColor, vec3(1.0), edgeAlpha)
         + vec3(bandVolume * edgeBrightness * (0.12 + 0.18 * glint)) + surfaceReflection * sideGloss
@@ -355,7 +366,11 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
       vec2 screenUV = gl_FragCoord.xy / wallResolution;
       float radius = resinDensity * (2.0 + 8.0 * resinDensity) * sqrt(wallThickness);
       vec2 spread = vec2(radius) / wallResolution;
-      vec3 blurred = texture2D(wallBackground, screenUV).rgb * 0.25;
+      vec3 blurred = vec3(0.0);
+      // A disabled density must never read an old/uninitialized HDR texture:
+      // multiplying its result by zero would still propagate NaN on the GPU.
+      if (resinDensity > 0.0) {
+      blurred = texture2D(wallBackground, screenUV).rgb * 0.25;
       blurred += (texture2D(wallBackground, screenUV + vec2(spread.x, 0.0)).rgb
         + texture2D(wallBackground, screenUV - vec2(spread.x, 0.0)).rgb
         + texture2D(wallBackground, screenUV + vec2(0.0, spread.y)).rgb
@@ -364,15 +379,25 @@ export function ribMaterials(settings = WALL_DEFAULTS, geometry = null) {
         + texture2D(wallBackground, screenUV - spread).rgb
         + texture2D(wallBackground, screenUV + spread * vec2(1.0, -1.0)).rgb
         + texture2D(wallBackground, screenUV + spread * vec2(-1.0, 1.0)).rgb) * 0.0625;
-      float scattering = density * 0.75;
+      }
+      bool wallBadBackground = !wallValidRadiance(blurred);
+      float scattering = wallBadBackground ? 0.0 : density * 0.75;
+      blurred = wallSafeRadiance(blurred);
       float finalCoverage = coverage + (1.0 - coverage) * scattering;
       outgoingLight = (outgoingLight * coverage + blurred * scattering * (1.0 - coverage)) / max(finalCoverage, 0.00001)
         + bottomAlpha * vec3(0.2 + 0.35 * glint);
       diffuseColor.a = finalCoverage;
       #include <output_fragment>
     `);
+    // Diagnostic colors are written after tone mapping, with other surfaces
+    // hidden in an offscreen pass. Green marks a wall; red/blue mark bad math.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', `
+      #include <dithering_fragment>
+      if (wallDiagnosticMode > 0.5)
+        gl_FragColor = vec4(wallBadReflection ? 1.0 : 0.0, 1.0, wallBadBackground ? 1.0 : 0.0, 1.0);
+    `);
   };
-  material.customProgramCacheKey = () => 'clear-molded-wall-v6';
+  material.customProgramCacheKey = () => 'clear-molded-wall-v7';
   material.extensions = { derivatives: true };
   return material;
 }

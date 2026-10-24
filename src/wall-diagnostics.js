@@ -26,6 +26,43 @@ export function inspectDraw(renderer, mesh) {
   };
 }
 
+// A separate unsigned-byte target reads the shader's validity flags, without
+// changing the displayed frame, user settings, or the scene's shadow maps.
+function probeWallPixels(game) {
+  const T = window.THREE, renderer = game.renderer;
+  const size = renderer.getDrawingBufferSize(new T.Vector2());
+  const target = new T.WebGLRenderTarget(size.x, size.y);
+  const previousTarget = renderer.getRenderTarget(), cameraMask = game.camera.layers.mask;
+  const shadowUpdate = renderer.shadowMap.autoUpdate, hidden = [];
+  game.scene.traverse(mesh => {
+    if ((mesh.isMesh || mesh.isSprite) && mesh.visible && !game.wallMaterials.has(mesh.material)) {
+      hidden.push(mesh); mesh.visible = false;
+    }
+  });
+  const pixels = new Uint8Array(size.x * size.y * 4);
+  try {
+    for (const material of game.wallMaterials) material.userData.wallDiagnosticMode.value = 1;
+    renderer.shadowMap.autoUpdate = false;
+    game.camera.layers.set(game.viewFloor + 1);
+    renderer.setRenderTarget(target); renderer.clear();
+    renderer.render(game.scene, game.camera);
+    renderer.readRenderTargetPixels(target, 0, 0, size.x, size.y, pixels);
+  } finally {
+    for (const material of game.wallMaterials) material.userData.wallDiagnosticMode.value = 0;
+    hidden.forEach(mesh => { mesh.visible = true; });
+    game.camera.layers.mask = cameraMask;
+    renderer.shadowMap.autoUpdate = shadowUpdate;
+    renderer.setRenderTarget(previousTarget); target.dispose();
+  }
+  let sampledWallPixels = 0, reflectionInvalidPixels = 0, backgroundInvalidPixels = 0;
+  for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 1] > 250 && pixels[i + 3] > 250) {
+    sampledWallPixels++;
+    if (pixels[i] > 250) reflectionInvalidPixels++;
+    if (pixels[i + 2] > 250) backgroundInvalidPixels++;
+  }
+  return { floor: game.viewFloor + 1, sampledWallPixels, reflectionInvalidPixels, backgroundInvalidPixels };
+}
+
 export function wallDiagnostics(game, version) {
   const draws = [];
   game.wallDiagnosticCapture = draws;
@@ -43,5 +80,6 @@ export function wallDiagnostics(game, version) {
     settings: { ...game.wallSettings },
     saved,
     draws,
+    pixelProbe: probeWallPixels(game),
   };
 }
