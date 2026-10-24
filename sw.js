@@ -1,4 +1,4 @@
-const CACHE = 'toukan-v7';
+const CACHE = 'toukan-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -10,7 +10,6 @@ const ASSETS = [
   './vendor/rapier.es.js',
   './src/app.js',
   './src/game.js',
-  './src/case-visuals.js',
   './src/stage.js',
   './src/editor.js',
   './src/storage.js',

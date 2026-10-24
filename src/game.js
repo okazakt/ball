@@ -1,9 +1,8 @@
 import { COLS, ROWS, GAP } from './stage.js';
-import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, setRibFaces, ribRimMaterial, ribRimGeometry, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
-  LID_Y = 1.07,
+  LID_Y = 1.335,
   CASE_WIDTH = COLS + 0.2,
   CASE_DEPTH = ROWS + 0.2,
   clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
@@ -32,6 +31,23 @@ export class Game {
     await R.init();
     this.R = R;
     this.scene = new T.Scene();
+    const faces = Array.from({ length: 6 }, (_, i) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const x = c.getContext('2d'),
+        g = x.createLinearGradient(0, 0, 64, 64);
+      g.addColorStop(0, i === 2 ? '#9db7be' : '#162e3b');
+      g.addColorStop(1, '#071119');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 64, 64);
+      x.fillStyle = i < 3 ? '#9cb8c6' : '#244855';
+      x.fillRect(12, 8, 5, 40);
+      return c;
+    });
+    const env = new T.CubeTexture(faces);
+    env.encoding = T.sRGBEncoding;
+    env.needsUpdate = true;
+    this.scene.environment = env;
     this.board = new T.Group();
     this.scene.add(this.board);
     this.camera = new T.PerspectiveCamera(42, 1, 0.1, 100);
@@ -46,8 +62,6 @@ export class Game {
     this.renderer.toneMapping = T.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.autoClear = false;
-    this.environmentTarget = studioEnvironment(this.renderer);
-    this.scene.environment = this.environmentTarget.texture;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = T.PCFSoftShadowMap;
     this.host.prepend(this.renderer.domElement);
@@ -118,9 +132,8 @@ export class Game {
     m.castShadow = true;
     m.receiveShadow = true;
     m.layers.set(f + 1);
-    if (this.stage?.floors[f]?.dark)
-      for (const material of Array.isArray(m.material) ? m.material : [m.material])
-        if (material.envMapIntensity !== undefined) material.envMapIntensity = 0;
+    if (this.stage?.floors[f]?.dark && m.material.envMapIntensity !== undefined)
+      m.material.envMapIntensity = 0;
     parent.add(m);
     return m;
   }
@@ -144,9 +157,9 @@ export class Game {
       const o = this.board.children[0];
       o.traverse((n) => {
         n.geometry?.dispose();
-        if (n.material) for (const material of Array.isArray(n.material) ? n.material : [n.material]) {
-          material.map?.dispose();
-          material.dispose();
+        if (n.material) {
+          n.material.map?.dispose();
+          n.material.dispose();
         }
       });
       this.board.remove(o);
@@ -162,8 +175,6 @@ export class Game {
     this.ripples = [];
     this.lastRipple = -1;
     this.floorGroups = [];
-    this.lidReflections = [];
-    this.ribAccents = [];
     this.activeFloor = 0;
     this.elapsed = 0;
     this.acc = 0;
@@ -196,92 +207,55 @@ export class Game {
       this.board.add(group);
       this.floorGroups.push(group);
       const start = this.board.children.length;
-      const wall = ribMaterials();
-      const floorRects = [];
-      for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
-        if (f.cells.some(c => c.x === x && c.z === z && c.type === 'hole')) continue;
-        const p = cellPos(x, z);
-        floorRects.push([(x - COLS / 2) * 100, (z - ROWS / 2) * 100,
-          (x + 1 - COLS / 2) * 100, (z + 1 - ROWS / 2) * 100]);
-        this.world.createCollider(this.R.ColliderDesc.cuboid(0.5, 0.12, 0.5)
-          .setTranslation(p.x, y - 0.12, p.z).setFriction(0.1).setRestitution(0.1));
-      }
-      if (floorRects.length) {
-        const floorGeo = solidGeometry(floorRects, 0.24);
-        const positions = floorGeo.attributes.position, uvs = floorGeo.attributes.uv;
-        for (let i = 0; i < positions.count; i++)
-          uvs.setXY(i, positions.getX(i) / COLS + 0.5, 0.5 - positions.getZ(i) / ROWS);
-        const floorMat = new T.MeshStandardMaterial({
-          color: 0xffffff, map: spaceTexture(), roughness: 0.65, metalness: 0, envMapIntensity: 0.1,
-        });
-        const floorMesh = this.mesh(floorGeo, floorMat, 0, y - 0.24, 0, fi);
-        floorMesh.userData.surface = 'floor';
-      }
-      const perimeter = w => w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
-      const wallRects = f.walls.filter(w => !perimeter(w)).map(w => {
-        const x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
-        return [x - 3.8, z - 3.8, x + (w.axis === 'h' ? 103.8 : 3.8), z + (w.axis === 'v' ? 103.8 : 3.8)];
-      });
-      if (wallRects.length) {
-        const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.012, fillet: 0.038 })), wall, 0, y, 0, fi);
-        walls.castShadow = false;
-        walls.userData.surface = 'walls';
-        this.addRibAccents(walls, fi, y);
-        this.addRibRims(walls, fi);
-      }
-      const frameRects = f.walls.filter(perimeter).map(w => {
-        let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
-        if (w.axis === 'h') {
-          z += w.z === 0 ? -2.5 : 2.5;
-          return [x - 7.5, z - 5, x + 107.5, z + 5];
+      const blue = this.material(fi % 2 ? 0x126073 : 0x2578a2),
+        wall = this.material(fi % 2 ? 0x45b5ac : 0x65c8ed);
+      blue.opacity = 0.96;
+      blue.transmission = 0.05;
+      blue.roughness = 0.4;
+      const screwMat = this.material(0x779ca4, false);
+      for (let x = 0; x < COLS; x++)
+        for (let z = 0; z < ROWS; z++) {
+          const p = cellPos(x, z);
+          if (!f.cells.some((c) => c.x === x && c.z === z && c.type === 'hole')) {
+            this.box(p.x, y - 0.12, p.z, 0.99, 0.24, 0.99, blue, fi);
+            const screw = this.mesh(
+              new T.CylinderGeometry(0.035, 0.035, 0.012, 6),
+              screwMat,
+              p.x - 0.43,
+              y + 0.009,
+              p.z - 0.43,
+              fi
+            );
+            screw.castShadow = false;
+          }
         }
-        x += w.x === 0 ? -2.5 : 2.5;
-        return [x - 5, z - 7.5, x + 5, z + 107.5];
-      });
-      if (frameRects.length) {
-        const frameMat = new T.MeshPhysicalMaterial({
-          color: 0x269c67, roughness: 0.26, metalness: 0,
-          transmission: 0, opacity: 1, transparent: false,
-          clearcoat: 1, clearcoatRoughness: 0.15, ior: 1.52, envMapIntensity: 0.5,
-        });
-        const frame = this.mesh(solidGeometry(frameRects, LID_Y, { bevel: 0.025, fillet: 0.045 }),
-          frameMat, 0, y, 0, fi);
-        frame.userData.surface = 'frame';
-      }
       for (const w of f.walls) {
         const p = cellPos(w.x, w.z);
-        this.world.createCollider(this.R.ColliderDesc.cuboid(w.axis === 'h' ? 0.55 : 0.05,
-          0.5, w.axis === 'h' ? 0.05 : 0.55)
-          .setTranslation(p.x + (w.axis === 'h' ? 0 : -0.5), y + 0.5,
-            p.z + (w.axis === 'h' ? -0.5 : 0)).setFriction(0.1).setRestitution(0.7));
+        const perimeter = w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
+        const height = perimeter ? 1.3 : 0.58;
+        this.box(
+          p.x + (w.axis === 'h' ? 0 : -0.5),
+          y + height / 2,
+          p.z + (w.axis === 'h' ? -0.5 : 0),
+          w.axis === 'h' ? 1.08 : 0.12,
+          height,
+          w.axis === 'h' ? 0.12 : 1.08,
+          wall,
+          fi
+        );
       }
-      const coverMat = new T.MeshPhysicalMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.012,
-        roughness: 0.08, metalness: 0, clearcoat: 1, envMapIntensity: 0.25,
-        depthWrite: false,
-      });
-      const cover = this.box(0, y + 1.035, 0, CASE_WIDTH, 0.07, CASE_DEPTH, coverMat, fi, false);
-      cover.castShadow = cover.receiveShadow = false;
-      cover.userData.surface = 'lid';
-      // Each ball collides with its own floor's lid, but can pass the next lid
-      // while falling. Group 1 is shared by balls and all ordinary obstacles.
-      this.world.createCollider(this.R.ColliderDesc.cuboid(CASE_WIDTH / 2, 0.035, CASE_DEPTH / 2)
-        .setTranslation(0, y + 1.035, 0).setRestitution(0.7).setFriction(0.1)
-        .setCollisionGroups(((1 << (fi + 1)) << 16) | 1));
-      const reflection = this.mesh(new T.PlaneGeometry(CASE_WIDTH, CASE_DEPTH),
-        lidReflectionMaterial(), 0, y + LID_Y + 0.001, 0, fi);
-      reflection.rotation.x = -Math.PI / 2;
-      reflection.castShadow = reflection.receiveShadow = false;
-      reflection.renderOrder = 100;
-      reflection.userData.dynamic = true;
-      this.lidReflections.push(reflection);
-      if (fi === 0) for (const start of stage.balls)
-        this.markCell(start, y, fi, 0x176bff, 'start');
+      {
+        // Lower lids are visual only: balls must still fall through floor holes.
+        const cover = this.box(0, y + 1.3, 0, CASE_WIDTH, 0.07, CASE_DEPTH, this.material(0x9cdeea), fi, fi === 0);
+        cover.material.opacity = 0.055;
+        cover.material.transmission = 0;
+        cover.castShadow = false;
+      }
       for (const c of f.cells) {
         const p = cellPos(c.x, c.z);
         if (c.type === 'hole') {
           const ring = this.mesh(
-            new T.TorusGeometry(0.52, 0.018, 6, 32),
+            new T.TorusGeometry(0.42, 0.045, 6, 24),
             this.material(0xffc36e, false),
             p.x,
             y + 0.01,
@@ -321,7 +295,27 @@ export class Game {
           );
           glow.userData.persistentLight = true;
         }
-        if (c.type === 'goal') this.markCell(c, y, fi, 0xef334b, 'goal');
+        if (c.type === 'goal') {
+          const ring = this.mesh(
+            new T.TorusGeometry(0.37, 0.07, 8, 32),
+            this.material(0xb4f6c7, false),
+            p.x,
+            y + 0.05,
+            p.z,
+            fi
+          );
+          ring.rotation.x = Math.PI / 2;
+          ring.material.emissive = new T.Color(0x47ae78);
+          const disc = this.mesh(
+            new T.CylinderGeometry(0.35, 0.35, 0.015, 24),
+            new T.MeshBasicMaterial({ color: 0x79d6a4, transparent: true, opacity: 0.25 }),
+            p.x,
+            y + 0.02,
+            p.z,
+            fi
+          );
+          this.effects.push({ mesh: disc, type: 'goal' });
+        }
         if (c.type === 'sticky') {
           const mesh = this.box(
             p.x,
@@ -361,50 +355,43 @@ export class Game {
         }
         if (c.type === 'door') {
           const body = this.world.createRigidBody(
-            this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, y + 0.5, p.z)
+            this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, y + 0.32, p.z)
           );
           const vertical = (c.rotation || 0) % 2 === 1;
           this.world.createCollider(
-            this.R.ColliderDesc.cuboid(vertical ? 0.05 : 0.5, 0.5, vertical ? 0.5 : 0.05)
+            this.R.ColliderDesc.cuboid(vertical ? 0.065 : 0.5, 0.32, vertical ? 0.5 : 0.065)
               .setFriction(0.1)
               .setRestitution(0.7),
             body
           );
-          const halfX = vertical ? 3.8 : 48.8, halfZ = vertical ? 48.8 : 3.8;
-          const doorGeometry = solidGeometry([[-halfX, -halfZ, halfX, halfZ]], 1,
-            { bevel: 0.012, fillet: 0.038 });
-          doorGeometry.translate(0, -0.5, 0);
-          const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
-          this.addRibRims(mesh, fi);
+          const mesh = this.box(
+            p.x,
+            y + 0.32,
+            p.z,
+            vertical ? 0.13 : 1,
+            0.64,
+            vertical ? 1 : 0.13,
+            this.material(0xffa45a),
+            fi,
+            false
+          );
           mesh.userData.dynamic = true;
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
         if (c.type === 'corner') {
-          const shape = new T.Shape();
-          shape.absarc(0, 0, 0.418, 0, -Math.PI / 2, true);
-          shape.absarc(0, -0.38, 0.038, -Math.PI / 2, Math.PI / 2, true);
-          shape.absarc(0, 0, 0.342, -Math.PI / 2, 0, false);
-          shape.absarc(0.38, 0, 0.038, Math.PI, 0, true);
-          shape.closePath();
-          const geometry = new T.ExtrudeGeometry(shape, { depth: 0.976, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 5, curveSegments: 24 });
-          geometry.rotateX(-Math.PI / 2);
-          geometry.rotateY(-((c.rotation || 0) * Math.PI) / 2);
-          geometry.translate(0, 0.012, 0);
-          geometry.userData.rimContours = [shape.getPoints(16).map(point => {
-            const p = new T.Vector3(point.x, 0, -point.y).applyAxisAngle(new T.Vector3(0, 1, 0),
-              -((c.rotation || 0) * Math.PI) / 2);
-            return [p.x, p.z];
-          })];
-          setRibFaces(geometry);
-          const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
-          corner.castShadow = false;
-          corner.userData.surface = 'walls';
-          this.addRibAccents(corner, fi, y);
-          this.addRibRims(corner, fi);
-          const vertices = geometry.attributes.position.array;
-          this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
-            Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i))
-            .setTranslation(p.x, y, p.z).setFriction(0.1).setRestitution(0.7));
+          for (let j = 0; j < 7; j++) {
+            const angle = ((j / 6) * Math.PI) / 2 + ((c.rotation || 0) * Math.PI) / 2;
+            this.box(
+              p.x + Math.cos(angle) * 0.38,
+              y + 0.22,
+              p.z + Math.sin(angle) * 0.38,
+              0.17,
+              0.44,
+              0.17,
+              wall,
+              fi
+            );
+          }
         }
         if (['robot', 'spider', 'slime'].includes(c.type)) this.createEnemy(c, fi);
       }
@@ -413,19 +400,18 @@ export class Game {
         if (child !== group && !child.userData.persistentLight) group.add(child);
       this.batchFloor(group);
     });
-    const radius = { S: 0.35, M: 0.4, L: 0.45 }[stage.size];
+    const radius = { S: 0.15, M: 0.22, L: 0.31 }[stage.size];
     stage.balls.forEach((p, i) => {
       const pos = cellPos(p.x, p.z),
         body = this.world.createRigidBody(
           this.R.RigidBodyDesc.dynamic()
-            .setTranslation(pos.x, radius + 0.02, pos.z)
+            .setTranslation(pos.x, radius + 0.1, pos.z)
             .setLinearDamping(0.02)
             .setAngularDamping(0.02)
             .setCcdEnabled(true)
         );
       const collider = this.world.createCollider(
         this.R.ColliderDesc.ball(radius)
-          .setCollisionGroups((1 << 16) | 3)
           .setDensity({ S: 0.7, M: 1.4, L: 2 }[stage.size])
           .setFriction(0.1)
           .setRestitution(0.7)
@@ -455,7 +441,7 @@ export class Game {
         new T.SphereGeometry(radius, 24, 16),
         mat,
         pos.x,
-        radius + 0.02,
+        radius + 0.1,
         pos.z,
         0
       );
@@ -477,37 +463,6 @@ export class Game {
     this.sync();
     this.events.loaded?.();
   }
-  addRibRims(body, fi) {
-    const rims = this.mesh(ribRimGeometry(body.geometry), ribRimMaterial(), 0, 0, 0, fi, body);
-    rims.castShadow = rims.receiveShadow = false;
-    rims.renderOrder = 2;
-    rims.userData.surface = 'rib-rims';
-  }
-  addRibAccents(rib, fi, y) {
-    const accent = (color, opacity, additive, height) => {
-      const material = new T.MeshBasicMaterial({
-        color, transparent: true, opacity, depthWrite: false,
-        blending: additive ? T.AdditiveBlending : T.NormalBlending,
-      });
-      const mesh = this.mesh(rib.geometry.clone(), material, rib.position.x, y + height, rib.position.z, fi);
-      mesh.scale.y = 0.001;
-      mesh.castShadow = mesh.receiveShadow = false;
-      mesh.renderOrder = 1;
-      mesh.userData.surface = 'rib-accent';
-      return mesh;
-    };
-    this.ribAccents.push({ fi, shadow: accent(0x02050c, 0.20, false, 0.004),
-      caustic: accent(0xb6dfff, 0.13, true, 0.007), x: rib.position.x, z: rib.position.z });
-  }
-  markCell(cell, y, fi, color, kind) {
-    const p = cellPos(cell.x, cell.z);
-    const tile = this.mesh(new T.PlaneGeometry(1, 1),
-      new T.MeshBasicMaterial({ color }), p.x, y + 0.004, p.z, fi);
-    tile.rotation.x = -Math.PI / 2;
-    tile.castShadow = tile.receiveShadow = false;
-    tile.userData.surface = kind;
-    return tile;
-  }
   start() {
     if (this.state !== 'ready') return;
     this.keys.clear();
@@ -521,7 +476,7 @@ export class Game {
   batchFloor(group) {
     const buckets = new Map();
     for (const m of group.children)
-      if (m.isMesh && !m.userData.dynamic && !m.userData.surface && m.material && !Array.isArray(m.material)) {
+      if (m.isMesh && !m.userData.dynamic && m.material) {
         const key = m.material.uuid;
         const list = buckets.get(key) || [];
         list.push(m);
@@ -946,27 +901,24 @@ export class Game {
           )
       );
       d.open = switched || this.elapsed % 7 > 4;
-      const ty = d.y + (d.open ? 1.55 : 0.5);
+      const ty = d.y + (d.open ? 1.02 : 0.32);
       d.body.setNextKinematicTranslation({ x: d.mesh.position.x, y: ty, z: d.mesh.position.z });
       d.mesh.position.y = ty;
     }
     if (Math.hypot(this.tilt.x, this.tilt.z) > 0.001)
       for (const b of this.balls) if (!b.done) b.body.wakeUp();
-    // Small toy clearances need substeps as well as CCD at high impact speeds.
-    this.world.timestep = dt / 4;
-    for (let substep = 0; substep < 4; substep++) {
-      this.world.step(this.queue);
-      this.queue.drainCollisionEvents((h1, h2, started) => {
-        if (!started) return;
-        for (const b of this.balls)
-          if (!b.done && (b.collider.handle === h1 || b.collider.handle === h2)) {
-            const p = b.body.translation();
-            const other = this.world.getCollider(b.collider.handle === h1 ? h2 : h1);
-            if (other && other.translation().y > -b.floor * GAP + 0.1)
-              this.makeNoise(p, b.floor, Math.max(0.3, b.prevSpeed * b.body.mass() * 6));
-          }
-      });
-    }
+    this.world.timestep = dt;
+    this.world.step(this.queue);
+    this.queue.drainCollisionEvents((h1, h2, started) => {
+      if (!started) return;
+      for (const b of this.balls)
+        if (!b.done && (b.collider.handle === h1 || b.collider.handle === h2)) {
+          const p = b.body.translation();
+          const other = this.world.getCollider(b.collider.handle === h1 ? h2 : h1);
+          if (other && other.translation().y > -b.floor * GAP + 0.1)
+            this.makeNoise(p, b.floor, Math.max(0.3, b.prevSpeed * b.body.mass() * 6));
+        }
+    });
     for (const b of this.balls) {
       if (b.done) continue;
       const p = b.body.translation(),
@@ -977,13 +929,12 @@ export class Game {
         return;
       }
       const nextFloor = clamp(
-        Math.floor((-p.y + b.radius + 0.02) / GAP),
+        Math.floor((-p.y + b.radius + 0.1) / GAP),
         0,
         this.stage.floors.length - 1
       );
       if (nextFloor > b.floor) {
         b.floor = nextFloor;
-        b.collider.setCollisionGroups((1 << 16) | 1 | (1 << (b.floor + 1)));
         b.mesh.layers.set(b.floor + 1);
         b.light.layers.set(b.floor + 1);
         b.mesh.material.envMapIntensity = this.stage.floors[b.floor].dark ? 0.015 : 0.22;
@@ -993,7 +944,7 @@ export class Game {
       const near = f.cells.filter((c) => {
         const q = cellPos(c.x, c.z);
         return (
-          Math.abs(q.x - p.x) < 0.44 && Math.abs(q.z - p.z) < 0.44 && p.y < -b.floor * GAP + b.radius + 0.12
+          Math.abs(q.x - p.x) < 0.44 && Math.abs(q.z - p.z) < 0.44 && p.y < -b.floor * GAP + 0.45
         );
       });
       const sticky = near.some((c) => c.type === 'sticky');
@@ -1067,20 +1018,8 @@ export class Game {
       }
     this.sun.position.set(4 + this.tilt.z * 12, 12 - fi * GAP, 3 + this.tilt.x * 10);
     this.sunTarget.position.set(0, -fi * GAP, 0);
-    for (const accent of this.ribAccents) {
-      const dx = (4 + this.tilt.z * 12) * 0.012, dz = (3 + this.tilt.x * 10) * 0.012;
-      accent.shadow.position.x = accent.x - dx;
-      accent.shadow.position.z = accent.z - dz;
-      accent.caustic.position.x = accent.x + dx * 0.6;
-      accent.caustic.position.z = accent.z + dz * 0.6;
-    }
     this.board.rotation.set(0, 0, 0);
     this.updateCamera();
-    for (let i = 0; i < this.lidReflections.length; i++) {
-      const reflection = this.lidReflections[i];
-      reflection.visible = i === fi;
-      reflection.material.uniforms.tilt.value.set(this.tilt.z, -this.tilt.x);
-    }
   }
   loop(now) {
     requestAnimationFrame((t) => this.loop(t));
