@@ -3,6 +3,10 @@ const T = window.THREE;
 // Union axis-aligned footprints before extrusion: no cell seams or internal
 // transparent faces, including at wall junctions and adjacent floor holes.
 export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}) {
+  // All editor coordinates are decimal grid units. Canonicalize BEFORE union:
+  // e.g. -100 + 103.8 and 0 + 3.8 must identify the same boundary.
+  // Microscopic cells otherwise become concave spikes after bevel offsets.
+  rectangles = rectangles.map(r => r.map(v => Math.round(v * 1e6) / 1e6));
   const xs = [...new Set(rectangles.flatMap(r => [r[0], r[2]]))].sort((a, b) => a - b);
   const zs = [...new Set(rectangles.flatMap(r => [r[1], r[3]]))].sort((a, b) => a - b);
   const filled = xs.slice(1).map((_, i) => zs.slice(1).map((_, j) => {
