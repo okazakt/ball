@@ -126,45 +126,26 @@ export function ribGeometry(rectangles, height = 1) {
   return setRibFaces(solidGeometry(rectangles.map(r => r.map(v => Math.round(v * 1e6) / 1e6)), height));
 }
 
-export function ribMaterials() {
-  return new T.MeshPhysicalMaterial({
-    color: 0xe8f4ff, transmission: 0, ior: 1.05,
-    thickness: 0.02, roughness: 0.05, metalness: 0.1,
-    opacity: 0.18, transparent: true, depthWrite: false,
-    clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3.5,
-  });
+export const WALL_DEFAULTS = Object.freeze({
+  transmission: 0.85, roughness: 0.15, ior: 1.25, envMapIntensity: 2, whiteness: 0.7,
+});
+
+export function applyWallSettings(material, settings) {
+  const wasTransmitting = material.transmission > 0;
+  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity'])
+    material[key] = settings[key];
+  material.color.setHex(0x99cfff).lerp(new T.Color(0xffffff), settings.whiteness);
+  // Transmission at zero changes shader defines; compile correctly at both ends.
+  if (wasTransmitting !== (material.transmission > 0)) material.needsUpdate = true;
 }
 
-export function addClearRibs(wall, rotation = 0) {
-  wall.geometry.computeBoundingBox();
-  const { min, max } = wall.geometry.boundingBox;
-  // Reuse the united outline so junctions have no overlapping segment ends.
-  // A rounded bevel forms the edge cross-section without changing the body.
-  for (const [name, thickness, opacity, y] of [
-    ['top-rib', 0.045, 0.75, max.y - 0.045],
-    ['bottom-rib', 0.025, 0.45, min.y],
-  ]) {
-    const bevel = Math.min(0.012, thickness * 0.45);
-    const geometry = new T.ExtrudeGeometry(wall.geometry.parameters.shapes, {
-      depth: thickness - bevel * 2, bevelEnabled: true,
-      bevelThickness: bevel, bevelSize: bevel, bevelSegments: 6,
-      curveSegments: 24, steps: 1,
-    });
-    geometry.rotateX(-Math.PI / 2);
-    geometry.rotateY(rotation);
-    geometry.translate(0, y + bevel, 0);
-    smoothMoldedNormals(geometry);
-    const material = new T.MeshPhysicalMaterial({
-      color: 0xffffff, transparent: true, opacity, roughness: 0.05,
-      metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.03,
-      depthWrite: false, envMapIntensity: 3.5,
-    });
-    const rib = new T.Mesh(geometry, material);
-    rib.layers.mask = wall.layers.mask;
-    rib.castShadow = rib.receiveShadow = false;
-    rib.userData.surface = name;
-    wall.add(rib);
-  }
+export function ribMaterials(settings = WALL_DEFAULTS) {
+  const material = new T.MeshPhysicalMaterial({
+    thickness: 0.02, metalness: 0.1, transparent: false, opacity: 1,
+    depthWrite: true, clearcoat: 1, clearcoatRoughness: 0.03,
+  });
+  applyWallSettings(material, settings);
+  return material;
 }
 
 export function setRibFaces(geometry) {

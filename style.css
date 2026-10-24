@@ -4,3 +4,11 @@
 #start-panel{position:absolute;inset:0;z-index:4;background:#07121b99;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px;text-align:center}#start-panel[hidden]{display:none}#start-panel small{color:#b1c9ce;font-size:11px}
 
 .version{display:block;color:var(--muted);font:10px ui-monospace,monospace;letter-spacing:.02em;margin-top:2px}
+
+#wall-controls{position:absolute;top:44px;left:12px;z-index:6;max-width:calc(100% - 24px);width:268px;border:1px solid #45606b;border-radius:10px;background:#10232ff2;color:var(--ink);font-size:12px;touch-action:pan-y}
+#wall-controls:not([open]){width:auto}
+#wall-controls summary{padding:10px 12px;cursor:pointer;min-height:40px;box-sizing:border-box}
+.wall-fields{padding:0 12px 8px;max-height:min(380px,55dvh);overflow-y:auto;overscroll-behavior:contain}
+.wall-fields label{display:grid;grid-template-columns:1fr auto;gap:4px;color:var(--ink);font-size:11px;margin-top:8px}
+.wall-fields output{font:12px ui-monospace,monospace;color:var(--mint)}
+.wall-fields input[type=range]{grid-column:1/-1;width:100%;min-height:32px;padding:0;margin:0;accent-color:var(--mint);touch-action:pan-y}

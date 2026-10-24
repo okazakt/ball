@@ -1,5 +1,5 @@
 import { COLS, ROWS, GAP } from './stage.js';
-import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, addClearRibs, setRibFaces, smoothMoldedNormals, studioEnvironment } from './case-visuals.js';
+import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_DEFAULTS, applyWallSettings, setRibFaces, smoothMoldedNormals, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
@@ -25,7 +25,13 @@ export class Game {
     this.ready = false;
     this.gyro = false;
     this.quest = true;
+    this.wallSettings = { ...WALL_DEFAULTS };
+    this.wallMaterials = new Set();
     this.setupInput();
+  }
+  updateWallSettings(patch) {
+    Object.assign(this.wallSettings, patch);
+    for (const material of this.wallMaterials) applyWallSettings(material, this.wallSettings);
   }
   async init() {
     const { default: R } = await import('../vendor/rapier.es.js');
@@ -191,13 +197,15 @@ export class Game {
     this.viewFloor = 0;
     this.board.rotation.set(0, 0, 0);
     this.updateCamera();
+    this.wallMaterials.clear();
     stage.floors.forEach((f, fi) => {
       const y = -fi * GAP;
       const group = new T.Group();
       this.board.add(group);
       this.floorGroups.push(group);
       const start = this.board.children.length;
-      const wall = ribMaterials();
+      const wall = ribMaterials(this.wallSettings);
+      this.wallMaterials.add(wall);
       const floorRects = [];
       for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
         if (f.cells.some(c => c.x === x && c.z === z && c.type === 'hole')) continue;
@@ -227,7 +235,6 @@ export class Game {
         const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.012, fillet: 0.038 })), wall, 0, y, 0, fi);
         walls.castShadow = false;
         walls.userData.surface = 'walls';
-        addClearRibs(walls);
       }
       const frameRects = f.walls.filter(perimeter).map(w => {
         let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
@@ -378,7 +385,6 @@ export class Game {
           const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
           mesh.castShadow = false;
           mesh.userData.dynamic = true;
-          addClearRibs(mesh);
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
         if (c.type === 'corner') {
@@ -397,7 +403,6 @@ export class Game {
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
           corner.castShadow = false;
           corner.userData.surface = 'walls';
-          addClearRibs(corner, -((c.rotation || 0) * Math.PI) / 2);
           const vertices = geometry.attributes.position.array;
           this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
             Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i))
@@ -471,6 +476,7 @@ export class Game {
         prevSpeed: 0,
       });
     });
+    this.updateWallSettings({});
     this.sync();
     this.events.loaded?.();
   }

@@ -82,6 +82,44 @@ const game = new Game($('#viewport'), sound, {
     $('#video').textContent = blob ? '録画を保存 / 共有' : 'このブラウザは録画非対応';
   },
 });
+const wallPanel = document.createElement('details');
+wallPanel.id = 'wall-controls';
+const wallSummary = document.createElement('summary');
+wallSummary.textContent = '壁マテリアル調整';
+wallPanel.append(wallSummary);
+const wallFields = document.createElement('div');
+wallFields.className = 'wall-fields';
+for (const [key, title, min, max] of [
+  ['transmission', '透過率 / transmission', 0, 1],
+  ['roughness', '粗さ / roughness', 0, 0.6],
+  ['ior', '屈折率 / ior', 1, 1.6],
+  ['envMapIntensity', 'ツヤ / envMapIntensity', 0, 5],
+  ['whiteness', '白み / 青み → 白', 0, 1],
+]) {
+  const label = document.createElement('label');
+  label.htmlFor = `wall-${key}`;
+  const caption = document.createElement('span');
+  caption.textContent = title;
+  const output = document.createElement('output');
+  output.htmlFor = `wall-${key}`;
+  const input = document.createElement('input');
+  Object.assign(input, { id: `wall-${key}`, type: 'range', min, max, step: 0.01,
+    value: game.wallSettings[key] });
+  output.value = Number(input.value).toFixed(2);
+  input.addEventListener('input', () => {
+    output.value = Number(input.value).toFixed(2);
+    game.updateWallSettings({ [key]: Number(input.value) });
+  });
+  label.append(caption, output, input);
+  wallFields.append(label);
+}
+// Keep native range gestures and keyboard controls, without tilting the board.
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+  'touchstart', 'touchmove', 'touchend', 'click', 'dblclick', 'keydown'])
+  wallPanel.addEventListener(type, event => event.stopPropagation());
+wallPanel.append(wallFields);
+$('#viewport').append(wallPanel);
+
 function showResult(r) {
   $('#result-tag').textContent = r.won ? 'MISSION COMPLETE' : 'SIGNAL LOST';
   $('#result-title').textContent = r.won ? '光の先に、到着。' : 'もう一度、そっと。';
