@@ -127,47 +127,25 @@ export function ribGeometry(rectangles, height = 1) {
 }
 
 export const WALL_DEFAULTS = Object.freeze({
-  transmission: 1, roughness: 0, ior: 1.25, envMapIntensity: 2,
-  emissiveIntensity: 0.15, topHighlight: 2,
+  transmission: 0.88, roughness: 0.12, ior: 1.5, envMapIntensity: 3,
   clearcoat: 1, clearcoatRoughness: 0.05, attenuationDistance: 0.5,
-  specularIntensity: 1, metalness: 0.08,
+  specularIntensity: 1, metalness: 0,
 });
 
 export function applyWallSettings(material, settings) {
-  const wasTransmitting = material.transmission > 0;
-  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity', 'emissiveIntensity',
+  for (const key of ['transmission', 'roughness', 'ior', 'envMapIntensity',
     'clearcoat', 'clearcoatRoughness', 'attenuationDistance', 'specularIntensity', 'metalness'])
     material[key] = settings[key];
-  material.userData.topHighlight.value = settings.topHighlight;
-  // Transmission at zero changes shader defines; compile correctly at both ends.
-  if (wasTransmitting !== (material.transmission > 0)) material.needsUpdate = true;
 }
 
 export function ribMaterials(settings = WALL_DEFAULTS) {
   const material = new T.MeshPhysicalMaterial({
-    thickness: 0.02, transparent: false, opacity: 1,
-    color: 0xffffff, emissive: 0xffffff,
+    thickness: 0.5, transparent: false, opacity: 1,
+    color: 0xffffff, emissiveIntensity: 0,
     // Pure white attenuation has no effect at any distance. A subtle blue tint
     // lets the distance control absorption without changing alpha or roughness.
     attenuationColor: 0xe8f4ff, depthWrite: true,
   });
-  material.userData.topHighlight = { value: settings.topHighlight };
-  // Change reflected light only on the curved roof; transmission stays intact.
-  material.onBeforeCompile = shader => {
-    shader.uniforms.wallTopHighlight = material.userData.topHighlight;
-    shader.vertexShader = 'varying float wallRoofWeight;\n' + shader.vertexShader;
-    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
-      #include <begin_vertex>
-      wallRoofWeight = smoothstep(0.05, 0.65, normal.y);
-    `);
-    shader.fragmentShader = 'uniform float wallTopHighlight; varying float wallRoofWeight;\n' + shader.fragmentShader;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <output_fragment>', `
-      vec3 roofReflection = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
-      outgoingLight = max(vec3(0.0), outgoingLight + roofReflection * (wallTopHighlight - 1.0) * wallRoofWeight);
-      #include <output_fragment>
-    `);
-  };
-  material.customProgramCacheKey = () => 'rounded-wall-roof-v1';
   applyWallSettings(material, settings);
   return material;
 }
@@ -188,18 +166,18 @@ export function studioEnvironment(renderer) {
     mesh.lookAt(0, 0, 0);
     room.add(mesh);
   };
-  // Dark studio flags keep broad reflections clear, while the HDR strips
-  // remain bright. A uniformly gray room would wash out the whole side panel.
+  // Broad studio softboxes reflect across flat acrylic side faces.
+  // Dark flags between them retain contrast in the transparent volume.
   panel(18, 18, 0, -5, 0, 0.01);
   panel(18, 12, 0, 1, -9, 0.025);
   panel(18, 12, 0, 1, 9, 0.025);
   panel(18, 12, -9, 1, 0, 0.035);
   panel(18, 12, 9, 1, 0, 0.035);
-  panel(8, 8, 0, 6, 0, 0.025);
-  panel(0.28, 8, -2.8, 5, 0, 2.8);
-  panel(0.28, 8, 2.8, 5, 0, 2.8);
-  panel(0.35, 5, -7, 1, 2, 2);
-  panel(0.35, 5, 7, 1, -2, 2);
+  panel(8, 8, 0, 6, 0, 0.35);
+  panel(2.0, 8, -2.8, 5, 0, 2.8);
+  panel(2.0, 8, 2.8, 5, 0, 2.8);
+  panel(4.0, 7, -7, 1, 2, 2);
+  panel(4.0, 7, 7, 1, -2, 2);
   const generator = new T.PMREMGenerator(renderer);
   const target = generator.fromScene(room, 0.02, 0.1, 40);
   generator.dispose();

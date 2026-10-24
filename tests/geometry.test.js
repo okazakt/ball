@@ -86,16 +86,20 @@ test('rounded transparent walls remain valid at every grid placement', async () 
       geometry.dispose();
     }
   const material = ribMaterials();
-  assert.equal(material.transmission, 1);
-  assert.equal(material.ior, 1.25);
-  assert.equal(material.thickness, 0.02);
-  assert.equal(material.roughness, 0);
-  assert.equal(material.metalness, .08);
+  assert.equal(material.transmission, .88);
+  assert.equal(material.ior, 1.5);
+  assert.equal(material.thickness, .5);
+  assert.equal(material.roughness, .12);
+  assert.equal(material.metalness, 0);
   assert.equal(material.clearcoat, 1);
   assert.equal(material.clearcoatRoughness, .05);
   assert.equal(material.attenuationDistance, .5);
   assert.equal(material.specularIntensity, 1);
   assert.equal(material.attenuationColor.getHex(), 0xe8f4ff);
+  assert.equal(material.envMapIntensity, 3);
+  assert.equal(material.emissiveIntensity, 0);
+  assert.equal(material.emissive.getHex(), 0);
+  assert.equal(Object.hasOwn(material, 'onBeforeCompile'), false);
   assert.equal(material.opacity, 1);
   assert.equal(material.transparent, false);
   material.dispose();
