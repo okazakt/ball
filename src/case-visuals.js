@@ -128,8 +128,8 @@ export function ribGeometry(rectangles, height = 1) {
 
 export function ribMaterials() {
   return new T.MeshPhysicalMaterial({
-    color: 0xffffff, transmission: 0.95, ior: 1.05,
-    thickness: 0.02, roughness: 0.03, metalness: 0,
+    color: 0xffffff, transmission: 0.4, ior: 1.05,
+    thickness: 0.02, roughness: 0.1, metalness: 0.1,
     opacity: 1, transparent: false, depthWrite: true,
     clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3.5,
   });

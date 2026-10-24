@@ -34,9 +34,9 @@ const assert = require('node:assert/strict');
       if (walls.children.length || g.floorGroups.some(group => group.children.some(m => ['rib-rims', 'rib-accent'].includes(m.userData.surface))))
         throw Error('Separate wall highlight meshes remain');
       walls.geometry.computeBoundingBox();
-      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission < 0.9 ||
+      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission !== 0.4 ||
           side.ior !== 1.05 || side.thickness !== 0.02 || side.roughness > 0.12 ||
-          side.transparent || side.envMapIntensity !== 3.5 || side.roughness !== 0.03 ||
+          side.transparent || side.envMapIntensity !== 3.5 || side.roughness !== 0.1 || side.metalness !== 0.1 ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
         throw Error('Clear rib optics, top edge or height are incorrect');
       if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)
@@ -46,10 +46,11 @@ const assert = require('node:assert/strict');
           throw Error('Rounded rib contains invalid vertices or normals');
       }
       const frame = g.floorGroups[0].children.find(m => m.userData.surface === 'frame');
-      if (!frame || frame.material.transparent || frame.material.transmission !== 0 ||
+      if (!frame || frame.castShadow || frame.material.transparent || frame.material.transmission !== 0 ||
           frame.material.color.getHex() !== 0x269c67) throw Error('Opaque green plastic frame missing');
       if (frame.material.roughness !== 0.1 || frame.material.envMapIntensity !== 2 ||
-          g.renderer.toneMappingExposure !== 1.25 || g.sun.intensity !== 3)
+          g.renderer.toneMappingExposure !== 1.25 || g.sun.intensity !== 3 ||
+          g.ambient.intensity !== 0.875 || g.sun.shadow.radius !== 4)
         throw Error('Plastic lighting settings are incorrect');
       if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
           !g.floorGroups[2].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))

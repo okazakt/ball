@@ -51,13 +51,14 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = T.PCFShadowMap;
     this.host.prepend(this.renderer.domElement);
-    this.ambient = new T.HemisphereLight(0xc3e9ff, 0x103140, 0.35);
+    this.ambient = new T.HemisphereLight(0xc3e9ff, 0x103140, 0.875);
     this.scene.add(this.ambient);
     this.sun = new T.DirectionalLight(0xffecd0, 3.0);
     this.sun.position.set(4, 12, 3);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
     this.sun.shadow.normalBias = 0.015;
+    this.sun.shadow.radius = 4;
     Object.assign(this.sun.shadow.camera, { left: -7, right: 7, top: 8, bottom: -8 });
     this.scene.add(this.sun);
     this.sunTarget = new T.Object3D();
@@ -245,6 +246,7 @@ export class Game {
         const frame = this.mesh(solidGeometry(frameRects, LID_Y, { bevel: 0.025, fillet: 0.045 }),
           frameMat, 0, y, 0, fi);
         frame.userData.surface = 'frame';
+        frame.castShadow = false;
       }
       for (const w of f.walls) {
         const p = cellPos(w.x, w.z);
