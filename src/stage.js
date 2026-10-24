@@ -15,7 +15,15 @@ export function defaultStage() {
     c = floor();
   a.walls.push(
     ...[0, 1, 2, 4, 5].map((x) => ({ axis: 'h', x, z: 3 })),
-    ...[1, 2, 3, 4].map((x) => ({ axis: 'h', x, z: 6 }))
+    ...[1, 2, 3, 4].map((x) => ({ axis: 'h', x, z: 6 })),
+    ...[5, 6, 7].map((x) => ({ axis: 'h', x, z: 1 })),
+    ...[4, 6, 7].map((x) => ({ axis: 'h', x, z: 2 })),
+    { axis: 'h', x: 7, z: 3 },
+    ...[5, 6].map((x) => ({ axis: 'h', x, z: 4 })),
+    ...[2, 3, 4].map((x) => ({ axis: 'v', x, z: 0 })),
+    { axis: 'v', x: 5, z: 2 },
+    { axis: 'v', x: 7, z: 2 },
+    { axis: 'v', x: 5, z: 4 }
   );
   a.cells = [
     { x: 4, z: 7, type: 'hole' },

@@ -1,3 +1,4 @@
+import { loadWallSettings, saveWallSettings } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
 import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_DEFAULTS, applyWallSettings, wallGeometry, curvedWallGeometry, prepareClearWall, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
@@ -25,7 +26,7 @@ export class Game {
     this.ready = false;
     this.gyro = false;
     this.quest = true;
-    this.wallSettings = { ...WALL_DEFAULTS };
+    this.wallSettings = loadWallSettings(WALL_DEFAULTS);
     this.wallMaterials = new Set();
     this.wallColliders = [];
     this.setupInput();
@@ -33,6 +34,7 @@ export class Game {
   updateWallSettings(patch) {
     const oldRadius = this.wallSettings.cornerRadius, oldThickness = this.wallSettings.wallThickness;
     Object.assign(this.wallSettings, patch);
+    saveWallSettings(this.wallSettings);
     for (const material of this.wallMaterials) applyWallSettings(material, this.wallSettings);
     if (oldThickness !== this.wallSettings.wallThickness) this.updateWallColliders();
     if (oldRadius !== this.wallSettings.cornerRadius || oldThickness !== this.wallSettings.wallThickness) {

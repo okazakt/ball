@@ -72,3 +72,21 @@ test('quest begins with one ball, no enemies, bright floors and expanded bounds'
   s.floors[2].cells.push({ x: 8, z: 10, type: 'goal' });
   assert.throws(() => validateStage(s));
 });
+
+test('initial B1 matches the reference layout without changing later floors', () => {
+  const s = validateStage(defaultStage()), f = s.floors[0];
+  const interior = f.walls.filter(w => w.axis === 'h' ? w.z > 0 && w.z < 11 : w.x > 0 && w.x < 8)
+    .map(w => `${w.axis}:${w.x}:${w.z}`).sort();
+  assert.deepEqual(interior, [
+    'h:0:3', 'h:1:3', 'h:2:3', 'h:4:3', 'h:5:3', 'h:7:3',
+    'h:1:6', 'h:2:6', 'h:3:6', 'h:4:6',
+    'h:5:1', 'h:6:1', 'h:7:1', 'h:4:2', 'h:6:2', 'h:7:2', 'h:5:4', 'h:6:4',
+    'v:2:0', 'v:3:0', 'v:4:0', 'v:5:2', 'v:7:2', 'v:5:4',
+  ].sort());
+  assert.deepEqual(s.balls, [{ x: 1, z: 1 }]);
+  assert.deepEqual(f.cells, [
+    { x: 4, z: 7, type: 'hole' }, { x: 1, z: 4, type: 'sticky' },
+    { x: 3, z: 3, type: 'door', rotation: 0 }, { x: 2, z: 2, type: 'switch' },
+  ]);
+  assert.equal(s.floors.length, 3);
+});
