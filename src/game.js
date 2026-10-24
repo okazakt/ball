@@ -1,5 +1,5 @@
 import { COLS, ROWS, GAP } from './stage.js';
-import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_DEFAULTS, applyWallSettings, setRibFaces, smoothMoldedNormals, studioEnvironment } from './case-visuals.js';
+import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_DEFAULTS, applyWallSettings, wallGeometry, curvedWallGeometry, prepareClearWall, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
@@ -30,8 +30,25 @@ export class Game {
     this.setupInput();
   }
   updateWallSettings(patch) {
+    const oldRadius = this.wallSettings.cornerRadius;
     Object.assign(this.wallSettings, patch);
     for (const material of this.wallMaterials) applyWallSettings(material, this.wallSettings);
+    if (oldRadius !== this.wallSettings.cornerRadius) {
+      clearTimeout(this.wallGeometryTimer);
+      // Rebuild only after the thumb pauses, so the other controls stay fluid.
+      this.wallGeometryTimer = setTimeout(() => this.refreshWallGeometry(), 80);
+    }
+  }
+  refreshWallGeometry() {
+    if (!this.board) return;
+    this.board.traverse(mesh => {
+      const factory = mesh.userData.wallGeometryFactory;
+      if (!factory) return;
+      const geometry = factory(), texture = prepareClearWall(geometry);
+      mesh.geometry.dispose(); mesh.material.alphaMap.dispose();
+      mesh.geometry = geometry; mesh.material.alphaMap = texture;
+      mesh.material.userData.wallDistance.value = texture;
+    });
   }
   async init() {
     const { default: R } = await import('../vendor/rapier.es.js');
@@ -149,6 +166,7 @@ export class Game {
   }
   load(stage, quest = true) {
     if (!this.ready) return;
+    clearTimeout(this.wallGeometryTimer);
     this.stopRecording();
     this.queue?.free();
     this.world?.free();
@@ -236,7 +254,9 @@ export class Game {
         return [x - 3.8, z - 3.8, x + (w.axis === 'h' ? 103.8 : 3.8), z + (w.axis === 'v' ? 103.8 : 3.8)];
       });
       if (wallRects.length) {
-        const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.004, bevelOffset: -0.004, bevelSegments: 5, fillet: 0.038 })), wall, 0, y, 0, fi);
+        const factory = () => wallGeometry(wallRects, this.wallSettings);
+        const walls = this.mesh(factory(), wall, 0, y, 0, fi);
+        walls.userData.wallGeometryFactory = factory;
         walls.castShadow = false;
         walls.userData.surface = 'walls';
       }
@@ -383,28 +403,18 @@ export class Game {
             body
           );
           const halfX = vertical ? 3.8 : 48.8, halfZ = vertical ? 48.8 : 3.8;
-          const doorGeometry = solidGeometry([[-halfX, -halfZ, halfX, halfZ]], 1,
-            { bevel: 0.004, bevelOffset: -0.004, bevelSegments: 5, fillet: 0.038 });
-          doorGeometry.translate(0, -0.5, 0);
-          const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
+          const factory = () => wallGeometry([[-halfX, -halfZ, halfX, halfZ]], this.wallSettings).translate(0, -0.5, 0);
+          const mesh = this.mesh(factory(), wall, p.x, y + 0.5, p.z, fi);
+          mesh.userData.wallGeometryFactory = factory;
           mesh.castShadow = false;
           mesh.userData.dynamic = true;
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
         if (c.type === 'corner') {
-          const shape = new T.Shape();
-          shape.absarc(0, 0, 0.418, 0, -Math.PI / 2, true);
-          shape.absarc(0, -0.38, 0.038, -Math.PI / 2, Math.PI / 2, true);
-          shape.absarc(0, 0, 0.342, -Math.PI / 2, 0, false);
-          shape.absarc(0.38, 0, 0.038, Math.PI, 0, true);
-          shape.closePath();
-          const geometry = new T.ExtrudeGeometry(shape, { depth: 0.992, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelOffset: -0.004, bevelSegments: 5, curveSegments: 24 });
-          geometry.rotateX(-Math.PI / 2);
-          geometry.rotateY(-((c.rotation || 0) * Math.PI) / 2);
-          geometry.translate(0, 0.004, 0);
-          smoothMoldedNormals(geometry);
-          setRibFaces(geometry);
+          const factory = () => curvedWallGeometry(c.rotation || 0, this.wallSettings);
+          const geometry = factory();
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
+          corner.userData.wallGeometryFactory = factory;
           corner.castShadow = false;
           corner.userData.surface = 'walls';
           const vertices = geometry.attributes.position.array;

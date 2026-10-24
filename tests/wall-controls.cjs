@@ -44,11 +44,12 @@ const fs = require('node:fs');
           window.wallUnchanged.push([m, m.geometry.uuid, m.material.uuid, m.material.color.getHex()]);
     });
     await page.locator('#wall-controls summary').click();
-    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 5);
-    assert.equal(await page.locator('#wall-centerOpacity').inputValue(), '0.02');
-    for (const [key, min, max] of [['edgeWidth', 0, 2], ['edgeBrightness', 0, 5],
-      ['sideGloss', 0, 3], ['centerOpacity', 0, .5], ['taperAngle', 0, 1]]) {
+    assert.equal(await page.locator('#wall-controls input[type=range]').count(), 7);
+    assert.equal(await page.locator('#wall-centerOpacity').inputValue(), '0.04');
+    for (const [key, min, max] of [['edgeWidth', .05, .5], ['edgeBrightness', 0, 5],
+      ['sideGloss', 0, 3], ['bottomEdge', 0, 1], ['centerOpacity', 0, .5], ['taperAngle', 0, .8], ['cornerRadius', 0, 1]]) {
       for (const value of [min, max]) {
+        const oldGeometry = key === 'cornerRadius' ? await page.evaluate(() => [...window.__toukan.game.wallMaterials].length && window.__toukan.game.floorGroups[0].children.find(m => m.userData.surface === 'walls').geometry.uuid) : null;
         await page.locator(`#wall-${key}`).evaluate((input, value) => {
           input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
         }, value);
@@ -67,9 +68,33 @@ const fs = require('node:fs');
               throw Error('Floor or frame changed');
           g.loop(performance.now());
         }, { key, value });
+        if (key === 'cornerRadius') await page.waitForFunction(old => window.__toukan.game.floorGroups[0].children.find(m => m.userData.surface === 'walls').geometry.uuid !== old, oldGeometry, { polling: 100 });
         assert.equal(await page.locator(`output[for=wall-${key}]`).textContent(), value.toFixed(2));
       }
     }
+    // Measure the actual game framebuffer, including its production shaders.
+    const bands = await page.evaluate(() => {
+      const g = window.__toukan.game;
+      g.tilt = { x: 0, z: 0 }; g.setLighting();
+      g.updateWallSettings({ sideGloss: 0, bottomEdge: 0, centerOpacity: 0, edgeBrightness: 3 });
+      const copy = document.createElement('canvas');
+      copy.width = g.renderer.domElement.width; copy.height = g.renderer.domElement.height;
+      const ctx = copy.getContext('2d', { willReadFrequently: true }), result = [];
+      for (const edgeWidth of [.05, .25, .5]) {
+        g.updateWallSettings({ edgeWidth });
+        g.renderer.clear(); g.renderer.render(g.scene, g.camera);
+        ctx.drawImage(g.renderer.domElement, 0, 0);
+        const pixels = ctx.getImageData(0, 0, copy.width, copy.height).data;
+        let bright = 0;
+        for (let i = 0; i < pixels.length; i += 4)
+          if (pixels[i] > 190 && pixels[i + 1] > 190 && pixels[i + 2] > 190) bright++;
+        result.push({ edgeWidth, bright });
+      }
+      return result;
+    });
+    console.log('Rendered white-band pixels:', JSON.stringify(bands));
+    assert.ok(bands[1].bright > bands[0].bright + 10, 'White bands must grow at 0.25');
+    assert.ok(bands[2].bright > bands[1].bright + 10, 'White bands must grow at 0.50');
     const slider = page.locator('#wall-edgeWidth');
     await slider.scrollIntoViewIfNeeded();
     const before = await page.evaluate(() => ({ ...window.__toukan.game.target }));
@@ -86,7 +111,7 @@ const fs = require('node:fs');
       g.load(structuredClone(g.stage));
       for (const m of g.wallMaterials) for (const key of Object.keys(settings))
         if (m.userData.wallUniforms[key].value !== settings[key]) throw Error('Settings lost on reload');
-      g.updateWallSettings({ edgeBrightness: 0, sideGloss: 0, centerOpacity: 0 });
+      g.updateWallSettings({ edgeBrightness: 0, sideGloss: 0, bottomEdge: 0, centerOpacity: 0 });
       g.setLighting(); g.camera.updateMatrixWorld(true);
       const render = () => { g.renderer.clear(); g.renderer.render(g.scene, g.camera); return g.renderer.domElement.toDataURL(); };
       const clear = render(), wallMeshes = [];
@@ -95,7 +120,7 @@ const fs = require('node:fs');
       });
       if (render() !== clear) throw Error('Clear wall changes the background');
       wallMeshes.forEach(m => m.visible = true);
-      const defaults = { edgeWidth: 1, edgeBrightness: 2.5, sideGloss: 1, centerOpacity: .02, taperAngle: .5 };
+      const defaults = { edgeWidth: .25, edgeBrightness: 3, sideGloss: 1.2, bottomEdge: .35, centerOpacity: .04, taperAngle: .35, cornerRadius: .5 };
       for (const [key, value] of Object.entries(defaults)) {
         const input = document.querySelector('#wall-' + key); input.value = value;
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -103,12 +128,14 @@ const fs = require('node:fs');
       g.tilt = { x: .35, z: -.35 }; g.loop(performance.now());
       document.querySelector('#start-panel').hidden = true;
     });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => window.__toukan.game.loop(performance.now()));
     fs.mkdirSync('/workspace/ball-captures/clear-molded', { recursive: true });
     await page.screenshot({ path: '/workspace/ball-captures/clear-molded/panel.png' });
     await page.locator('#wall-controls summary').click();
     await page.screenshot({ path: '/workspace/ball-captures/clear-molded/tilted.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.deepEqual(errors, []);
-    console.log('PASS: five sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
+    console.log('PASS: seven sliders, exact clear-background match, all wall types, floor/frame preservation, reload and input isolation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

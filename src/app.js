@@ -90,11 +90,13 @@ wallPanel.append(wallSummary);
 const wallFields = document.createElement('div');
 wallFields.className = 'wall-fields';
 for (const [key, title, min, max] of [
-  ['edgeWidth', '両フチの太さ / edgeWidth', 0, 2],
+  ['edgeWidth', '白帯の幅比率 / edgeWidth', 0.05, 0.5],
   ['edgeBrightness', '両フチの輝度 / edgeBrightness', 0, 5],
   ['sideGloss', '側面のツヤ / sideGloss', 0, 3],
+  ['bottomEdge', '根元の接地帯 / bottomEdge', 0, 1],
   ['centerOpacity', '中央の不透明度 / centerOpacity', 0, 0.5],
-  ['taperAngle', '抜き勾配 / taperAngle', 0, 1],
+  ['taperAngle', '抜き勾配 / taperAngle', 0, 0.8],
+  ['cornerRadius', '先端・角の丸み / cornerRadius', 0, 1],
 ]) {
   const label = document.createElement('label');
   label.htmlFor = `wall-${key}`;

@@ -89,7 +89,28 @@ test('rounded transparent walls remain valid at every grid placement', async () 
   assert.equal(material.transmission, 0);
   assert.equal(material.depthWrite, false);
   assert.equal(material.transparent, true);
-  assert.equal(material.userData.wallUniforms.centerOpacity.value, .02);
-  assert.equal(Object.keys(material.userData.wallUniforms).length, 5);
+  assert.equal(material.userData.wallUniforms.centerOpacity.value, .04);
+  assert.equal(Object.keys(material.userData.wallUniforms).length, 7);
   material.dispose();
+});
+
+test('corner radius preserves U caps and valid L/T/cross junctions at both extremes', async () => {
+  const { wallGeometry, WALL_DEFAULTS } = await import('../src/case-visuals.js');
+  const T = context.THREE;
+  for (const cornerRadius of [0, .5, 1]) {
+    const settings = { ...WALL_DEFAULTS, cornerRadius };
+    const arms = [[-103.8, -3.8, 3.8, 3.8], [-3.8, -3.8, 103.8, 3.8],
+      [-3.8, -103.8, 3.8, 3.8], [-3.8, -3.8, 3.8, 103.8]];
+    for (let mask = 1; mask < 16; mask++) {
+      const geometry = wallGeometry(arms.filter((_, i) => mask & (1 << i)), settings);
+      checkBody(geometry);
+      geometry.dispose();
+    }
+    const geometry = wallGeometry([[-3.8, -3.8, 103.8, 3.8]], settings);
+    const material = new T.MeshBasicMaterial(), mesh = new T.Mesh(geometry, material);
+    const ray = (x, z) => new T.Raycaster(new T.Vector3(x, 2, z), new T.Vector3(0, -1, 0)).intersectObject(mesh);
+    assert.ok(ray(1.02, 0).length, 'rounded tip should retain its center');
+    assert.equal(ray(1.03, .03).length, 0, 'tip should be U shaped, not square');
+    geometry.dispose(); material.dispose();
+  }
 });
