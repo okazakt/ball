@@ -1,4 +1,5 @@
 import { wallDiagnostics } from './wall-diagnostics.js';
+import { keepScreenAwake } from './wake-lock.js';
 import { VERSION } from './version.js';
 import { Game } from './game.js';
 import { Sound } from './audio.js';
@@ -6,6 +7,7 @@ import { Editor } from './editor.js';
 import { defaultStage, decodeStage, stageURL, validateStage } from './stage.js';
 import * as store from './storage.js';
 const $ = (s) => document.querySelector(s);
+keepScreenAwake();
 const displayVersion = VERSION.split('+')[0];
 $('#app-version').textContent = `v${displayVersion}`;
 $('#menu-version').textContent = `表示中のバージョン：v${displayVersion}`;

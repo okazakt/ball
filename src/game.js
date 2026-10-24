@@ -1,4 +1,4 @@
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, rampHull, footprint } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, insideGoal } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { loadWallSettings, saveWallSettings } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -84,7 +84,7 @@ export class Game {
     this.scene = new T.Scene();
     this.board = new T.Group();
     this.scene.add(this.board);
-    this.camera = new T.PerspectiveCamera(42, 1, 0.1, 100);
+    this.camera = new T.PerspectiveCamera(18, 1, 0.1, 100);
     this.camera.layers.enableAll();
     this.renderer = new T.WebGLRenderer({
       antialias: true,
@@ -126,13 +126,17 @@ export class Game {
       h = Math.max(1, this.host.clientHeight);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
-    this.distance = CASE_DEPTH / (2 * Math.tan(T.MathUtils.degToRad(this.camera.fov / 2)));
+    // Fit the lid without stretching either axis, including short/wide screens.
+    this.viewHeight = Math.max(CASE_DEPTH, CASE_WIDTH / this.camera.aspect);
+    this.viewWidth = this.viewHeight * this.camera.aspect;
+    this.distance = this.viewHeight / (2 * Math.tan(T.MathUtils.degToRad(this.camera.fov / 2)));
     this.updateCamera();
   }
   updateCamera() {
     const lidY = LID_Y;
-    const eyeX = -Math.tan(this.tilt.z) * this.distance;
-    const eyeZ = -Math.tan(this.tilt.x) * this.distance;
+    // Limit visual obliqueness independently of the physical control range.
+    const eyeX = -Math.tan(this.tilt.z * .3) * this.distance;
+    const eyeZ = -Math.tan(this.tilt.x * .3) * this.distance;
     // Keep the optical axis perpendicular to the lid. The asymmetric frustum
     // passes through its four corners, so only objects below it show parallax.
     this.camera.up.set(0, 0, -1);
@@ -140,10 +144,10 @@ export class Game {
     this.camera.lookAt(eyeX, lidY, eyeZ);
     const scale = this.camera.near / this.distance;
     this.camera.projectionMatrix.makePerspective(
-      (-CASE_WIDTH / 2 - eyeX) * scale,
-      (CASE_WIDTH / 2 - eyeX) * scale,
-      (CASE_DEPTH / 2 + eyeZ) * scale,
-      (-CASE_DEPTH / 2 + eyeZ) * scale,
+      (-this.viewWidth / 2 - eyeX) * scale,
+      (this.viewWidth / 2 - eyeX) * scale,
+      (this.viewHeight / 2 + eyeZ) * scale,
+      (-this.viewHeight / 2 + eyeZ) * scale,
       this.camera.near,
       this.camera.far
     );
@@ -572,6 +576,19 @@ export class Game {
     tile.rotation.x = -Math.PI / 2;
     tile.castShadow = tile.receiveShadow = false;
     tile.userData.surface = kind;
+    // Rounded, low ridges on all four edges. The same radius is used by Rapier.
+    for (const axis of ['x', 'z']) for (const sign of [-1, 1]) {
+      const x = p.x + (axis === 'z' ? sign * MARKER_EDGE : 0);
+      const z = p.z + (axis === 'x' ? sign * MARKER_EDGE : 0);
+      const bump = this.mesh(new T.CylinderGeometry(MARKER_BUMP_RADIUS, MARKER_BUMP_RADIUS, 2 * MARKER_EDGE, 12),
+        new T.MeshStandardMaterial({ color, roughness: .25 }), x, y, z, fi);
+      bump.rotation[axis === 'x' ? 'z' : 'x'] = Math.PI / 2;
+      bump.userData.surface = kind + '-bump';
+      const rotation = axis === 'x' ? { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }
+        : { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 };
+      this.world.createCollider(this.R.ColliderDesc.cylinder(MARKER_EDGE, MARKER_BUMP_RADIUS)
+        .setTranslation(x, y, z).setRotation(rotation).setFriction(.15).setRestitution(0));
+    }
     return tile;
   }
   start() {
@@ -1077,7 +1094,7 @@ export class Game {
           this.events.status?.('磁力ネット！ シェイク連打で脱出');
         }
       }
-      if (near.some((c) => c.type === 'goal') && b.sticky <= 0) {
+      if (f.cells.some((c) => c.type === 'goal' && insideGoal(p, b.radius, c, b.floor)) && b.sticky <= 0) {
         b.done = true;
         b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
         b.collider.setSensor(true);

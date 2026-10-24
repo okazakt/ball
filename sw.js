@@ -1,4 +1,4 @@
-const CACHE = 'toukan-2.0.0+58a34f47f9d3';
+const CACHE = 'toukan-2.0.1+10efbe7d8fd4';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS = [
   './vendor/three.min.js',
   './vendor/rapier.es.js',
   './src/app.js',
+  './src/wake-lock.js',
   './src/version.js',
   './src/game.js',
   './src/wall-settings.js',

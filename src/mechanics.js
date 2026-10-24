@@ -2,6 +2,13 @@ export const COLS = 8, ROWS = 11, FLOOR_THICKNESS = .24, GAP = 1 + FLOOR_THICKNE
 export const DIRECTIONS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 export const direction = c => DIRECTIONS[c.rotation ?? 0];
 export const cellCenter = (x, z) => ({ x: x - (COLS - 1) / 2, z: z - (ROWS - 1) / 2 });
+export const MARKER_EDGE = .46, MARKER_BUMP_RADIUS = .035;
+export function insideGoal(p, radius, cell, fi) {
+  const q = cellCenter(cell.x, cell.z);
+  const inset = MARKER_EDGE - MARKER_BUMP_RADIUS - radius;
+  return Math.abs(p.x-q.x) < inset && Math.abs(p.z-q.z) < inset
+    && Math.abs(p.y-(-fi*GAP+radius)) < .06;
+}
 export function footprint(c) {
   const [dx, dz] = direction(c);
   return ['door', 'ramp'].includes(c.type) ? [{ x: c.x, z: c.z }, { x: c.x + dx, z: c.z + dz }] : [{ x: c.x, z: c.z }];
