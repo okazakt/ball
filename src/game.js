@@ -204,6 +204,7 @@ export class Game {
   }
   load(stage, quest = true) {
     if (!this.ready) return;
+    if (!['S', 'M'].includes(stage.size)) throw Error('玉サイズはSまたはMを指定してください');
     clearTimeout(this.wallGeometryTimer);
     this.stopRecording();
     this.queue?.free();
@@ -472,7 +473,7 @@ export class Game {
         if (child !== group && !child.userData.persistentLight) group.add(child);
       this.batchFloor(group);
     });
-    const radius = { S: 0.35, M: 0.4, L: 0.45 }[stage.size];
+    const radius = { S: 0.35, M: 0.4 }[stage.size];
     stage.balls.forEach((p, i) => {
       const pos = cellPos(p.x, p.z),
         body = this.world.createRigidBody(
@@ -485,7 +486,7 @@ export class Game {
       const collider = this.world.createCollider(
         this.R.ColliderDesc.ball(radius)
           .setCollisionGroups((1 << 16) | 3)
-          .setDensity({ S: 0.7, M: 1.4, L: 2 }[stage.size])
+          .setDensity({ S: 0.7, M: 1.4 }[stage.size])
           .setFriction(0.1)
           .setRestitution(0.7)
           .setRestitutionCombineRule(this.R.CoefficientCombineRule.Min)

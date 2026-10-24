@@ -122,7 +122,7 @@ const assert = require('node:assert/strict');
       const perimeter = original.floors[0].walls.filter(w =>
         w.axis === 'h' ? w.z === 0 || w.z === 11 : w.x === 0 || w.x === 8);
       const corridor = [5, 6].flatMap(z => Array.from({ length: 8 }, (_, x) => ({ axis: 'h', x, z })));
-      for (const [size, radius] of [['S', 0.35], ['M', 0.4], ['L', 0.45]]) {
+      for (const [size, radius] of [['S', 0.35], ['M', 0.4]]) {
         g.load({ ...original, size, balls: [{ x: 4, z: 5 }],
           floors: [{ dark: false, cells: [], walls: [...perimeter, ...corridor] }] }, false);
         const b = g.balls[0], start = b.body.translation().x;
@@ -143,13 +143,13 @@ const assert = require('node:assert/strict');
         }
         if (!bounced) throw Error('Ceiling rebound missing');
       }
-      g.load({ ...original, size: 'L', balls: [{ x: 4, z: 5 }],
+      g.load({ ...original, size: 'M', balls: [{ x: 4, z: 5 }],
         floors: Array.from({ length: 3 }, () => ({ dark: false, cells: [], walls: perimeter })) }, false);
       for (const fi of [1, 2]) {
         const b = g.balls[0];
         b.floor = fi;
         b.collider.setCollisionGroups((1 << 16) | 1 | (1 << (fi + 1)));
-        b.body.setTranslation({ x: 0.5, y: -fi * 3 + 0.46, z: 0 }, true);
+        b.body.setTranslation({ x: 0.5, y: -fi * 3 + 0.41, z: 0 }, true);
         b.body.setLinvel({ x: 0, y: 6, z: 0 }, true);
         for (let i = 0; i < 6; i++) {
           g.step(1 / 60);
@@ -285,7 +285,7 @@ const assert = require('node:assert/strict');
     await context.setOffline(false);
     assert.deepEqual(errors, []);
     console.log(
-      'PASS: seamless floor/walls, start/goal colors, S/M/L corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
+      'PASS: seamless floor/walls, start/goal colors, S/M corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
     );
   } finally {
     await browser.close();

@@ -61,7 +61,7 @@ export function validateStage(s) {
     s.name.length > 40 ||
     typeof s.author !== 'string' ||
     s.author.length > 24 ||
-    !['S', 'M', 'L'].includes(s.size) ||
+    !['S', 'M'].includes(s.size) ||
     !Number.isFinite(s.limit) ||
     s.limit < 10 ||
     s.limit > 3600 ||

@@ -18,6 +18,7 @@ test('untrusted shared stages reject invalid coordinates, overlaps and bounds', 
     (s) => s.floors[2].cells.push({ x: 0, z: 0, type: 'hole' }),
     (s) => (s.limit = Infinity),
     (s) => (s.size = 'XL'),
+    (s) => (s.size = 'L'),
     (s) => (s.floors[0].cells[0].type = 'script'),
   ]) {
     const s = defaultStage();
