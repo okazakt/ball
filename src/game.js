@@ -1,3 +1,4 @@
+import { inspectDraw } from './wall-diagnostics.js';
 import { loadWallSettings, saveWallSettings } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
 import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, WALL_DEFAULTS, applyWallSettings, wallGeometry, curvedWallGeometry, prepareClearWall, studioEnvironment } from './case-visuals.js';
@@ -172,6 +173,12 @@ export class Game {
     m.castShadow = true;
     m.receiveShadow = true;
     m.layers.set(f + 1);
+    if (isWall) {
+      m.userData.wallFloor = f;
+      m.onAfterRender = () => {
+        if (this.wallDiagnosticCapture) this.wallDiagnosticCapture.push(inspectDraw(this.renderer, m));
+      };
+    }
     if (isWall) m.onBeforeRender = () => {
       const top = m.position.y + m.geometry.boundingBox.max.y;
       m.material.userData.wallBottomContact.value = clamp(1 - Math.abs(m.position.y + m.geometry.boundingBox.min.y + f * GAP) / 0.07, 0, 1);

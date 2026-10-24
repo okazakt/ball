@@ -1,3 +1,4 @@
+import { wallDiagnostics } from './wall-diagnostics.js';
 import { VERSION } from './version.js';
 import { Game } from './game.js';
 import { Sound } from './audio.js';
@@ -89,6 +90,34 @@ wallSummary.textContent = '壁マテリアル調整';
 wallPanel.append(wallSummary);
 const wallFields = document.createElement('div');
 wallFields.className = 'wall-fields';
+const diagnosticButton = document.createElement('button');
+diagnosticButton.id = 'wall-diagnose';
+diagnosticButton.type = 'button';
+diagnosticButton.textContent = '壁の描画診断を表示';
+const diagnosticText = document.createElement('textarea');
+diagnosticText.id = 'wall-diagnostic-result';
+diagnosticText.readOnly = true;
+diagnosticText.hidden = true;
+diagnosticText.setAttribute('aria-label', '壁の描画診断結果');
+const copyDiagnostic = document.createElement('button');
+copyDiagnostic.type = 'button';
+copyDiagnostic.textContent = '診断結果をコピー';
+copyDiagnostic.hidden = true;
+diagnosticButton.onclick = () => {
+  if (!game.ready || !game.stage) return;
+  diagnosticText.value = JSON.stringify(wallDiagnostics(game, VERSION), null, 2);
+  diagnosticText.hidden = copyDiagnostic.hidden = false;
+};
+copyDiagnostic.onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(diagnosticText.value);
+    toast('診断結果をコピーしました');
+  } catch {
+    diagnosticText.focus(); diagnosticText.select();
+    toast('診断結果を選択しました。コピーしてください');
+  }
+};
+wallFields.append(diagnosticButton, diagnosticText, copyDiagnostic);
 for (const [key, title, min, max] of [
   ['edgeWidth', '白帯の幅比率 / edgeWidth', 0.05, 0.5],
   ['edgeBrightness', '両フチの輝度 / edgeBrightness', 0, 5],

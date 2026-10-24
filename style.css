@@ -13,3 +13,5 @@
 .wall-fields label{display:grid;grid-template-columns:1fr auto;gap:4px;color:var(--ink);font-size:11px;margin-top:8px}
 .wall-fields output{font:12px ui-monospace,monospace;color:var(--mint)}
 .wall-fields input[type=range]{grid-column:1/-1;width:100%;min-height:32px;padding:0;margin:0;accent-color:var(--mint);touch-action:pan-y}
+
+#wall-diagnostic-result{box-sizing:border-box;width:100%;height:180px;font:10px ui-monospace,monospace;white-space:pre;touch-action:pan-y}

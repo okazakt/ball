@@ -34,11 +34,26 @@ const fs = require('node:fs');
       g.state = 'ready'; g.renderScene();
       document.querySelector('#start-panel').hidden = true;
     }, saved);
-    fs.mkdirSync('/workspace/ball-captures/v1.4.0', { recursive: true });
-    await page.screenshot({ path: '/workspace/ball-captures/v1.4.0/top.png' });
+    const beforeDiagnostics = await page.evaluate(() => window.__toukan.game.renderer.domElement.toDataURL());
+    await page.locator('#wall-diagnose').evaluate(button => button.click());
+    const diagnostics = JSON.parse(await page.locator('#wall-diagnostic-result').inputValue());
+    assert.deepEqual(diagnostics.settings, saved);
+    assert.deepEqual(diagnostics.saved, saved);
+    assert.equal(diagnostics.contextLost, false);
+    assert.ok(diagnostics.draws.length >= 3);
+    for (const draw of diagnostics.draws) {
+      assert.equal(draw.linked, true);
+      assert.equal(draw.hasDensityCode, true);
+      assert.equal(draw.hasOpacityCode, true);
+      for (const [key, value] of Object.entries(saved))
+        assert.ok(Math.abs(draw.gpuValues[key] - value) < 1e-5, `GPU mismatch: ${key}`);
+    }
+    assert.equal(await page.evaluate(() => window.__toukan.game.renderer.domElement.toDataURL()), beforeDiagnostics);
+    fs.mkdirSync('/workspace/ball-captures/v1.4.1', { recursive: true });
+    await page.screenshot({ path: '/workspace/ball-captures/v1.4.1/top.png' });
     await page.evaluate(() => { const g = window.__toukan.game; g.tilt = { x: .35, z: -.35 }; g.renderScene(); });
-    await page.screenshot({ path: '/workspace/ball-captures/v1.4.0/tilted.png' });
+    await page.screenshot({ path: '/workspace/ball-captures/v1.4.1/tilted.png' });
     assert.deepEqual(errors, []);
-    console.log('PASS: all 14 values, UI, materials and wall geometry survive page reload; initial course renders without errors');
+    console.log('PASS: all 14 values, UI, materials and wall geometry survive page reload; initial course renders without errors; diagnostics read actual GPU values without altering rendering');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
