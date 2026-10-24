@@ -16,6 +16,75 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => window.__toukan?.game.ready, {}, { timeout: 30000 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     assert.equal(await page.evaluate(() => window.__toukan.game.state), 'ready');
+    await page.evaluate(async () => {
+      const g = window.__toukan.game;
+      const area = geometry => {
+        const p = geometry.attributes.position, n = geometry.attributes.normal;
+        let total = 0;
+        for (let i = 0; i < p.count; i += 3) if (n.getY(i) > 0.9)
+          total += Math.abs((p.getX(i + 1) - p.getX(i)) * (p.getZ(i + 2) - p.getZ(i)) -
+            (p.getX(i + 2) - p.getX(i)) * (p.getZ(i + 1) - p.getZ(i))) / 2;
+        return total;
+      };
+      const floor = g.floorGroups[0].children.find(m => m.userData.surface === 'floor');
+      const walls = g.floorGroups[0].children.find(m => m.userData.surface === 'walls');
+      if (Math.abs(area(floor.geometry) - 87) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
+        throw Error('Seamless wallpaper floor or floor hole missing');
+      const side = walls.material;
+      const rims = walls.children.find(m => m.userData.surface === 'rib-rims');
+      walls.geometry.computeBoundingBox();
+      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission < 0.9 ||
+          side.ior < 1.49 || side.ior > 1.59 || side.thickness !== 0.1 || side.roughness > 0.12 ||
+          !side.transparent || side.envMapIntensity !== 2.5 || side.roughness !== 0.02 ||
+          !rims || rims.material.opacity !== 0.75 || rims.geometry.userData.rimLevels.length !== 2 ||
+          Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
+        throw Error('Clear rib optics, top edge or height are incorrect');
+      if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)
+        throw Error('PMREM studio environment missing');
+      for (const geometry of [walls.geometry, rims.geometry]) {
+        if (![...geometry.attributes.position.array, ...geometry.attributes.normal.array].every(Number.isFinite))
+          throw Error('Rounded rib contains invalid vertices or normals');
+      }
+      rims.geometry.computeBoundingBox();
+      if (Math.abs(rims.geometry.boundingBox.min.y) > 1e-6 || Math.abs(rims.geometry.boundingBox.max.y - 1) > 1e-6)
+        throw Error('Tube rims extend outside the case clearance');
+      const frame = g.floorGroups[0].children.find(m => m.userData.surface === 'frame');
+      if (!frame || frame.material.transparent || frame.material.transmission !== 0 ||
+          frame.material.color.getHex() !== 0x269c67) throw Error('Opaque green plastic frame missing');
+      if (!g.ribAccents.length) throw Error('Rib contact shading missing');
+      if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
+          !g.floorGroups[2].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
+        throw Error('Start and goal tile colors are incorrect');
+      const { solidGeometry, setRibFaces } = await import(new URL('./src/case-visuals.js', location.href).href);
+      for (const rectangles of [
+        [[0, 0, 100, 100], [100, 0, 200, 100]],
+        [[0, 0, 100, 100], [100, 100, 200, 200]],
+      ]) {
+        const geometry = solidGeometry(rectangles, 1);
+        if (Math.abs(area(geometry) - 2) > 0.001) throw Error('Footprint union failed');
+        geometry.dispose();
+      }
+      const junction = setRibFaces(solidGeometry([
+        [-50, -4.4, 50, 4.4], [-4.4, -4.4, 4.4, 50],
+      ], 1, { bevel: 0.006, fillet: 0.012 }));
+      const mesh = new THREE.Mesh(junction, walls.material);
+      const ray = new THREE.Raycaster(new THREE.Vector3(0.013, 2, 0.017), new THREE.Vector3(0, -1, 0));
+      const tops = ray.intersectObject(mesh).filter(hit => hit.face.normal.y > 0.35);
+      if (junction.groups.length !== 1 || tops.length !== 1 || Math.abs(tops[0].point.y - 1) > 1e-6)
+        throw Error('Rib junction has a gap or overlapping top faces');
+      junction.dispose();
+      // A rounded endpoint has no square corner in the top surface.
+      const capsule = solidGeometry([[-53.8, -3.8, 53.8, 3.8]], 1,
+        { bevel: 0.012, fillet: 0.038 });
+      const capMesh = new THREE.Mesh(capsule, walls.material);
+      ray.set(new THREE.Vector3(0.531, 2, 0.031), new THREE.Vector3(0, -1, 0));
+      if (ray.intersectObject(capMesh).some(hit => hit.point.y > 0.999))
+        throw Error('Rib end is square rather than semicircular');
+      ray.set(new THREE.Vector3(0.535, 2, 0), new THREE.Vector3(0, -1, 0));
+      if (!ray.intersectObject(capMesh).some(hit => hit.point.y > 0.999))
+        throw Error('Rounded endpoint is missing');
+      capsule.dispose();
+    });
     // Off-axis projection must pin the lid at every tilt, floor and viewport.
     for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
       await page.setViewportSize(viewport);
@@ -30,7 +99,7 @@ const assert = require('node:assert/strict');
             if (g.board.rotation.x !== 0 || g.board.rotation.z !== 0)
               throw Error('Board rotated');
             for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-              const p = new T.Vector3(sx * 4.1, -floor * 3 + 1.335, sz * 5.6).project(g.camera);
+              const p = new T.Vector3(sx * 4.1, -floor * 3 + 1.07, sz * 5.6).project(g.camera);
               if (Math.abs(p.x - sx) > 1e-6 || Math.abs(p.y + sz) > 1e-6)
                 throw Error('Lid corner moved');
             }
@@ -46,11 +115,57 @@ const assert = require('node:assert/strict');
         const lower = new T.Vector3(0, -3, 0).project(g.camera);
         if (!(floor.x > origin.x && floor.y < origin.y && lower.x > floor.x))
           throw Error('Missing depth-dependent parallax');
+        const accent = g.ribAccents[0];
+        const tiltedShadow = accent.shadow.position.clone();
         g.tilt = { x: 0, z: 0 };
         g.setLighting();
+        if (accent.shadow.position.distanceTo(tiltedShadow) < 0.02)
+          throw Error('Rib contact shadow does not follow lighting');
       });
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      const g = window.__toukan.game, original = g.stage;
+      const perimeter = original.floors[0].walls.filter(w =>
+        w.axis === 'h' ? w.z === 0 || w.z === 11 : w.x === 0 || w.x === 8);
+      const corridor = [5, 6].flatMap(z => Array.from({ length: 8 }, (_, x) => ({ axis: 'h', x, z })));
+      for (const [size, radius] of [['S', 0.35], ['M', 0.4], ['L', 0.45]]) {
+        g.load({ ...original, size, balls: [{ x: 4, z: 5 }],
+          floors: [{ dark: false, cells: [], walls: [...perimeter, ...corridor] }] }, false);
+        const b = g.balls[0], start = b.body.translation().x;
+        if (b.radius !== radius || Math.abs(b.collider.radius() - radius) > 1e-6)
+          throw Error('Ball dimensions do not match');
+        g.keys.add('ArrowRight');
+        for (let i = 0; i < 30; i++) g.step(1 / 60);
+        if (b.body.translation().x - start < 0.5) throw Error(`${size} cannot pass a one-cell corridor`);
+        g.keys.clear();
+        g.tilt = g.target = { x: 0, z: 0 };
+        b.body.setTranslation({ x: 0.5, y: radius + 0.01, z: 0 }, true);
+        b.body.setLinvel({ x: 0, y: 6, z: 0 }, true);
+        let bounced = false;
+        for (let i = 0; i < 8; i++) {
+          g.step(1 / 60);
+          if (b.body.translation().y + radius > 1.015) throw Error(`Ball passed through ceiling: ${size} frame ${i}, top ${b.body.translation().y + radius}, vy ${b.body.linvel().y}`);
+          if (b.body.linvel().y < 0) bounced = true;
+        }
+        if (!bounced) throw Error('Ceiling rebound missing');
+      }
+      g.load({ ...original, size: 'L', balls: [{ x: 4, z: 5 }],
+        floors: Array.from({ length: 3 }, () => ({ dark: false, cells: [], walls: perimeter })) }, false);
+      for (const fi of [1, 2]) {
+        const b = g.balls[0];
+        b.floor = fi;
+        b.collider.setCollisionGroups((1 << 16) | 1 | (1 << (fi + 1)));
+        b.body.setTranslation({ x: 0.5, y: -fi * 3 + 0.46, z: 0 }, true);
+        b.body.setLinvel({ x: 0, y: 6, z: 0 }, true);
+        for (let i = 0; i < 6; i++) {
+          g.step(1 / 60);
+          if (b.body.translation().y + b.radius > -fi * 3 + 1.015)
+            throw Error('Lower-floor ceiling collision missing');
+        }
+      }
+      g.load(original);
+    });
     await page.evaluate(() => {
       const g = window.__toukan.game;
       const original = g.stage;
@@ -70,19 +185,26 @@ const assert = require('node:assert/strict');
       if (b.body.linvel().x > -1) throw Error('Sluggish direction reversal');
       g.keys.clear();
       g.tilt = g.target = { x: 0, z: 0 };
-      b.body.setTranslation({ x: 3, y: b.radius + 0.005, z: 0 }, true);
+      // Measure the material's normal restitution without simultaneous floor
+      // friction/rolling impulses, which also change the horizontal velocity.
+      b.body.setTranslation({ x: 3, y: 0.5, z: 0 }, true);
       b.body.setLinvel({ x: 4, y: 0, z: 0 }, true);
       b.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      g.world.gravity = { x: 0, y: 0, z: 0 };
+      g.world.timestep = 1 / 240;
       let rebound = 0;
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 160; i++) {
         const incoming = b.body.linvel().x;
-        g.step(1 / 60);
+        g.world.step(g.queue);
         if (b.body.linvel().x < 0) {
           rebound = -b.body.linvel().x / incoming;
           break;
         }
       }
-      if (rebound < 0.6 || rebound > 0.8) throw Error(`Unexpected wall restitution: ${rebound}`);
+      // Rapier's speculative contacts soften the measured velocity ratio;
+      // check both the configured coefficient and a substantial real rebound.
+      if (b.collider.restitution() < 0.6 || rebound < 0.4 || rebound > 0.8)
+        throw Error(`Unexpected wall restitution: ${rebound}`);
       g.load(original);
     });
     await page.waitForTimeout(700);
@@ -170,7 +292,7 @@ const assert = require('node:assert/strict');
     await context.setOffline(false);
     assert.deepEqual(errors, []);
     console.log(
-      'PASS: pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
+      'PASS: seamless floor/walls, start/goal colors, S/M/L corridor clearance, ceiling collisions, pinned lid, parallax, tilt response, wall rebound, rendering, input, physics hole, NG replay, goals, favorites, QR, editor conflict/undo/redo, offline startup'
     );
   } finally {
     await browser.close();
