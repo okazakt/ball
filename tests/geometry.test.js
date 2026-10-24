@@ -87,8 +87,8 @@ test('rounded plastic ribs remain valid at every grid placement', async () => {
     }
   const material = ribMaterials();
   assert.equal(material.transmission, .95);
-  assert.equal(material.ior, 1.52);
-  assert.equal(material.thickness, 1.5);
+  assert.equal(material.ior, 1.05);
+  assert.equal(material.thickness, 0.02);
   assert.equal(material.roughness, .03);
   material.dispose();
 });

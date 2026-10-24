@@ -35,7 +35,7 @@ const assert = require('node:assert/strict');
         throw Error('Separate wall highlight meshes remain');
       walls.geometry.computeBoundingBox();
       if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission < 0.9 ||
-          side.ior < 1.49 || side.ior > 1.59 || side.thickness !== 1.5 || side.roughness > 0.12 ||
+          side.ior !== 1.05 || side.thickness !== 0.02 || side.roughness > 0.12 ||
           side.transparent || side.envMapIntensity !== 3.5 || side.roughness !== 0.03 ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
         throw Error('Clear rib optics, top edge or height are incorrect');

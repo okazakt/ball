@@ -373,6 +373,7 @@ export class Game {
             { bevel: 0.012, fillet: 0.038 });
           doorGeometry.translate(0, -0.5, 0);
           const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
+          mesh.castShadow = false;
           mesh.userData.dynamic = true;
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
