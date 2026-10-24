@@ -2,7 +2,8 @@ const T = window.THREE;
 
 // Union axis-aligned footprints before extrusion: no cell seams or internal
 // transparent faces, including at wall junctions and adjacent floor holes.
-export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}) {
+export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0, outlineOnly = false } = {}) {
+  rectangles = rectangles.map(r => r.map(v => Math.round(v * 1e6) / 1e6));
   const xs = [...new Set(rectangles.flatMap(r => [r[0], r[2]]))].sort((a, b) => a - b);
   const zs = [...new Set(rectangles.flatMap(r => [r[1], r[3]]))].sort((a, b) => a - b);
   const filled = xs.slice(1).map((_, i) => zs.slice(1).map((_, j) => {
@@ -52,7 +53,7 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
     // single outline, rather than overlapping individually rounded blocks.
     const corners = points.filter((p, i) => {
       const a = points[(i + points.length - 1) % points.length], b = points[(i + 1) % points.length];
-      return Math.abs((p.x - a.x) * (b.y - p.y) - (p.y - a.y) * (b.x - p.x)) > 1e-9;
+      return Math.abs((p.x - a.x) * (b.y - p.y) - (p.y - a.y) * (b.x - p.x)) > 1e-14;
     });
     corners.forEach((p, i) => {
       const a = corners[(i + corners.length - 1) % corners.length], b = corners[(i + 1) % corners.length];
@@ -77,6 +78,7 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
     for (const hole of holes) if (contains(points, hole[0])) shape.holes.push(trace(new T.Path(), hole));
     return shape;
   });
+  if (outlineOnly) return shapes;
   const geometry = new T.ExtrudeGeometry(shapes, {
     depth: height - bevel * 2, bevelEnabled: bevel > 0, bevelThickness: bevel,
     bevelSize: bevel, bevelSegments: 5, curveSegments: fillet ? 8 : 1, steps: 1,
@@ -90,91 +92,198 @@ export function solidGeometry(rectangles, height, { bevel = 0, fillet = 0 } = {}
 
 export function ribMaterials() {
   return new T.MeshPhysicalMaterial({
-    color: 0xffffff, transmission: 0.95, ior: 1.5,
-    thickness: 0.10, roughness: 0.02, metalness: 0,
-    opacity: 1, transparent: true, depthWrite: false,
-    clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.5,
+    color: 0xffffff, transmission: 1, ior: 1.52,
+    thickness: 0.8, roughness: 0, metalness: 0,
+    opacity: 1, transparent: false, depthWrite: false,
+    clearcoat: 1, clearcoatRoughness: 0, envMapIntensity: 3.5,
   });
 }
 
-export function setRibFaces(geometry) {
-  // The entire rounded body stays clear; separate tube meshes carry the rims.
-  geometry.clearGroups();
-  geometry.addGroup(0, geometry.attributes.position.count, 0);
-  return geometry;
+// Morph a united capsule footprint through a fully rounded vertical profile.
+// The shoulder radius is half the physical thickness, not an attached tube.
+export function moldedRibGeometry(rectangles, height = 1, thickness = 0.16) {
+  const half = thickness / 2;
+  const outline = width => solidGeometry(rectangles.map(r => {
+    const inset = (half - width) * 100;
+    return [r[0] + inset, r[1] + inset, r[2] - inset, r[3] - inset];
+  }), height, { fillet: width, outlineOnly: true }).flatMap(shape => [shape, ...shape.holes]);
+  return roundedVolume(outline, height, thickness, { rectangles });
 }
 
-export function ribRimMaterial() {
-  return new T.MeshPhysicalMaterial({
-    color: 0xffffff, roughness: 0.05, metalness: 0.1,
-    clearcoat: 1, clearcoatRoughness: 0.02,
-    transparent: true, opacity: 0.75, depthWrite: false, envMapIntensity: 2.5,
-  });
+export function moldedCurveGeometry(rotation = 0, height = 1, thickness = 0.16) {
+  const outline = width => {
+    const shape = new T.Shape();
+    shape.absarc(0, 0, 0.38 + width, 0, -Math.PI / 2, true);
+    shape.absarc(0, -0.38, width, -Math.PI / 2, Math.PI / 2, true);
+    shape.absarc(0, 0, 0.38 - width, -Math.PI / 2, 0, false);
+    shape.absarc(0.38, 0, width, Math.PI, 0, true);
+    shape.closePath();
+    const points = shape.getPoints(24).map(p => p.rotateAround(new T.Vector2(), -rotation));
+    return [new T.Shape(points)];
+  };
+  return roundedVolume(outline, height, thickness, { curveRotation: rotation });
 }
 
-// Sweep circular tubes around the already united outlines. Unlike adding a
-// cylinder to every tile, this leaves no doubled rims at L/T junctions.
-export function ribRimGeometry(body, radius = 0.008) {
-  body.computeBoundingBox();
-  const levels = [body.boundingBox.min.y + radius, body.boundingBox.max.y - radius];
-  const positions = [], normals = [], indices = [], sides = 12;
-  for (const contour of body.userData.rimContours || []) {
-    const points = contour.filter((p, i) => !i || Math.hypot(p[0] - contour[i - 1][0], p[1] - contour[i - 1][1]) > 1e-7);
-    if (points.length > 1 && Math.hypot(points[0][0] - points.at(-1)[0], points[0][1] - points.at(-1)[1]) < 1e-7) points.pop();
-    if (points.length < 3) continue;
-    for (const y of levels) {
-      const offset = positions.length / 3;
-      points.forEach((p, i) => {
-        const a = points[(i + points.length - 1) % points.length], b = points[(i + 1) % points.length];
-        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const nx = -(b[1] - a[1]) / length, nz = (b[0] - a[0]) / length;
-        for (let j = 0; j <= sides; j++) {
-          const angle = j / sides * Math.PI * 2, c = Math.cos(angle), s = Math.sin(angle);
-          positions.push(p[0] + radius * nx * c, y + radius * s, p[1] + radius * nz * c);
-          normals.push(nx * c, s, nz * c);
-        }
-      });
-      for (let i = 0; i < points.length; i++) for (let j = 0; j < sides; j++) {
-        const a = offset + i * (sides + 1) + j, b = offset + ((i + 1) % points.length) * (sides + 1) + j;
-        indices.push(a, b, a + 1, a + 1, b, b + 1);
-      }
+function roundedVolume(outline, height, thickness, metadata) {
+  const half = thickness / 2, radius = Math.min(half, height / 2);
+  const full = outline(half);
+  const sample = path => {
+    const points = [];
+    for (const curve of path.curves) {
+      if (curve.getLength() < 1e-7) continue;
+      const divisions = curve.type === 'LineCurve' ? 1 : 12;
+      for (let i = 0; i < divisions; i++) points.push(curve.getPoint(i / divisions));
     }
+    return points;
+  };
+  // Concentrate triangles on the domes, not along long straight wall faces.
+  const counts = full.map(path => sample(path).length);
+  const levels = [];
+  for (let i = 0; i <= 10; i++) {
+    const angle = i / 10 * Math.PI / 2;
+    levels.push({ y: radius * (1 - Math.cos(angle)), width: half - radius + Math.max(1e-4, radius * Math.sin(angle)) });
+  }
+  for (let i = 0; i <= 10; i++) {
+    const angle = i / 10 * Math.PI / 2;
+    levels.push({ y: height - radius + radius * Math.sin(angle), width: half - radius + Math.max(1e-4, radius * Math.cos(angle)) });
+  }
+  const positions = [], indices = [], seams = [], rings = levels
+    .filter((level, i) => !i || Math.abs(level.y - levels[i - 1].y) + Math.abs(level.width - levels[i - 1].width) > 1e-8)
+    .map(level => ({ ...level, paths: outline(Math.min(half, level.width)) }));
+  for (let contour = 0; contour < full.length; contour++) {
+    const offset = positions.length / 3, count = counts[contour];
+    seams.push({ offset, count, rings: rings.length });
+    rings.forEach(ring => {
+      const samples = sample(ring.paths[contour]);
+      for (let i = 0; i <= count; i++) {
+        const p = samples.length === count ? samples[i % count] : ring.paths[contour].getPoint(i / count);
+        positions.push(p.x, ring.y, -p.y);
+      }
+    });
+    for (let ring = 0; ring < rings.length - 1; ring++) for (let i = 0; i < count; i++) {
+      const a = offset + ring * (count + 1) + i, b = a + count + 1;
+      indices.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const contains = (points, p) => {
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const a = points[i], b = points[j];
+      if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
+        inside = !inside;
+    }
+    return inside;
+  };
+  for (const [ring, reverse] of [[rings[0], true], [rings.at(-1), false]]) {
+    const loops = ring.paths.map(path => sample(path));
+    const holes = loops.filter(p => !T.ShapeUtils.isClockWise(p));
+    const shapes = loops.filter(p => T.ShapeUtils.isClockWise(p)).map(points => {
+      const shape = new T.Shape(points);
+      for (const hole of holes) if (contains(points, hole[0])) shape.holes.push(new T.Path(hole));
+      return shape;
+    });
+    const cap = new T.ShapeGeometry(shapes);
+    const p = cap.attributes.position, offset = positions.length / 3;
+    for (let i = 0; i < p.count; i++) positions.push(p.getX(i), ring.y, -p.getY(i));
+    const order = cap.index?.array || Array.from({ length: p.count }, (_, i) => i);
+    for (let i = 0; i < order.length; i += 3) {
+      const a = offset + order[i], b = offset + order[i + 1], c = offset + order[i + 2];
+      indices.push(a, reverse ? c : b, reverse ? b : c);
+    }
+    cap.dispose();
   }
   const geometry = new T.BufferGeometry();
   geometry.setAttribute('position', new T.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new T.Float32BufferAttribute(normals, 3));
   geometry.setIndex(indices);
-  geometry.userData.rimLevels = levels;
-  geometry.userData.radius = radius;
+  geometry.computeVertexNormals();
+  const normals = geometry.attributes.normal;
+  for (const seam of seams) for (let ring = 0; ring < seam.rings; ring++) {
+    const a = seam.offset + ring * (seam.count + 1), b = a + seam.count;
+    const n = new T.Vector3().fromBufferAttribute(normals, a)
+      .add(new T.Vector3().fromBufferAttribute(normals, b)).normalize();
+    normals.setXYZ(a, n.x, n.y, n.z);
+    normals.setXYZ(b, n.x, n.y, n.z);
+  }
+  geometry.userData.fullContours = full.map(path => path.getPoints(12).map(p => [p.x, -p.y]));
+  Object.assign(geometry.userData, metadata);
+  geometry.userData.thickness = thickness;
+  geometry.userData.shoulderRadius = radius;
   return geometry;
 }
 
+export function ribCore(body) {
+  const thickness = body.userData.thickness * 0.7;
+  let geometry;
+  if (body.userData.curveRotation !== undefined) {
+    geometry = moldedCurveGeometry(body.userData.curveRotation, 0.03, thickness);
+  } else {
+    const inset = (body.userData.thickness - thickness) * 50;
+    const rectangles = body.userData.rectangles.map(r => [r[0] + inset, r[1] + inset, r[2] - inset, r[3] - inset]);
+    geometry = moldedRibGeometry(rectangles, 0.03, thickness);
+  }
+  body.computeBoundingBox();
+  geometry.translate(0, body.boundingBox.max.y - 0.064, 0);
+  geometry.userData.coreWidth = thickness;
+  return { geometry, material: new T.MeshPhysicalMaterial({
+    color: 0xffffff, transmission: 0.82, opacity: 1, transparent: false,
+    ior: 1.52, thickness: 0.08, roughness: 0.025, metalness: 0,
+    clearcoat: 1, clearcoatRoughness: 0.01, envMapIntensity: 3.5, depthWrite: false,
+  }) };
+}
+
+export function contactShadow(body) {
+  body.computeBoundingBox();
+  const box = body.boundingBox, pad = 0.055;
+  const width = box.max.x - box.min.x + pad * 2, depth = box.max.z - box.min.z + pad * 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(64, Math.ceil(width * 128));
+  canvas.height = Math.max(64, Math.ceil(depth * 128));
+  const ctx = canvas.getContext('2d');
+  const sx = canvas.width / width, sz = canvas.height / depth;
+  ctx.beginPath();
+  for (const points of body.userData.fullContours || []) {
+    points.forEach((p, i) => {
+      const x = (p[0] - box.min.x + pad) * sx, z = (p[1] - box.min.z + pad) * sz;
+      if (!i) ctx.moveTo(x, z); else ctx.lineTo(x, z);
+    });
+    ctx.closePath();
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.52)';
+  ctx.shadowColor = 'rgba(0,0,0,0.65)';
+  ctx.shadowBlur = 6;
+  ctx.fill('evenodd');
+  const texture = new T.CanvasTexture(canvas);
+  const geometry = new T.PlaneGeometry(width, depth);
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate((box.min.x + box.max.x) / 2, 0.003, (box.min.z + box.max.z) / 2);
+  return { geometry, material: new T.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }) };
+}
+
 export function studioEnvironment(renderer) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, 1024, 1024);
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 4; i++) ctx.fillRect(100 + i * 224, 100, 64, 824);
+  const texture = new T.CanvasTexture(canvas);
+  texture.encoding = T.sRGBEncoding;
   const room = new T.Scene();
-  room.background = new T.Color(0x030507);
-  const panel = (w, h, x, y, z, brightness) => {
-    const mesh = new T.Mesh(new T.PlaneGeometry(w, h),
-      new T.MeshBasicMaterial({ color: new T.Color(brightness, brightness, brightness), side: T.DoubleSide }));
-    mesh.position.set(x, y, z);
-    mesh.lookAt(0, 0, 0);
-    room.add(mesh);
-  };
-  // Dark studio flags keep broad reflections clear, while the HDR strips
-  // remain bright. A uniformly gray room would wash out the whole side panel.
-  panel(18, 18, 0, -5, 0, 0.01);
-  panel(18, 12, 0, 1, -9, 0.025);
-  panel(18, 12, 0, 1, 9, 0.025);
-  panel(18, 12, -9, 1, 0, 0.035);
-  panel(18, 12, 9, 1, 0, 0.035);
-  panel(8, 8, 0, 6, 0, 0.12);
-  panel(1.2, 11, -2.8, 5, 0, 12);
-  panel(1.2, 11, 2.8, 5, 0, 12);
-  panel(1.1, 7, -7, 1, 2, 8);
-  panel(1.1, 7, 7, 1, -2, 8);
+  room.background = new T.Color(0x000000);
+  const lights = new T.Mesh(new T.PlaneGeometry(16, 16), new T.MeshBasicMaterial({
+    map: texture, color: new T.Color(20, 20, 20), side: T.DoubleSide, toneMapped: false,
+  }));
+  lights.position.set(0, 5, 0);
+  lights.rotation.x = Math.PI / 2;
+  room.add(lights);
   const generator = new T.PMREMGenerator(renderer);
-  const target = generator.fromScene(room, 0.02, 0.1, 40);
+  const target = generator.fromScene(room, 0.008, 0.1, 40);
+  target.texture.userData.whiteBands = 4;
   generator.dispose();
-  room.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
+  lights.geometry.dispose();
+  lights.material.dispose();
+  texture.dispose();
   return target;
 }
 
@@ -195,7 +304,7 @@ export function spaceTexture() {
     ctx.fillStyle = glow;
     ctx.fillRect(x - r, y - r, r * 2, r * 2);
   }
-  for (let i = 0; i < 1100; i++) {
+  for (let i = 0; i < 350; i++) {
     const x = random() * 768, y = random() * 1056, r = 0.25 + random() * 1.1;
     ctx.fillStyle = `rgba(208,225,255,${0.2 + random() * 0.7})`;
     ctx.beginPath();
@@ -208,6 +317,21 @@ export function spaceTexture() {
       ctx.fillStyle = glow;
       ctx.fillRect(x - 9, y - 9, 18, 18);
     }
+  }
+  // Printed dark toy board: continuous lines supply clear refraction cues.
+  for (let x = 0; x < 8; x++) for (let z = 0; z < 11; z++) {
+    if ((x + z) % 2 === 0) {
+      ctx.fillStyle = 'rgba(62,112,142,0.07)';
+      ctx.fillRect(x * 96, z * 96, 96, 96);
+    }
+  }
+  for (let step of [24, 96]) {
+    ctx.strokeStyle = step === 96 ? 'rgba(121,195,218,0.58)' : 'rgba(95,156,184,0.13)';
+    ctx.lineWidth = step === 96 ? 2.2 : 0.8;
+    ctx.beginPath();
+    for (let x = 0; x <= 768; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, 1056); }
+    for (let y = 0; y <= 1056; y += step) { ctx.moveTo(0, y); ctx.lineTo(768, y); }
+    ctx.stroke();
   }
   const texture = new T.CanvasTexture(canvas);
   texture.encoding = T.sRGBEncoding;
@@ -222,11 +346,12 @@ export function lidReflectionMaterial() {
       void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `varying vec2 vUv; uniform vec2 tilt;
       void main() {
-        vec2 p = vUv - vec2(0.5) - tilt * 0.55;
-        float band = exp(-pow((p.x + p.y * 0.32 - 0.30) / 0.075, 2.0));
-        float second = exp(-pow((p.x + p.y * 0.32 + 0.40) / 0.025, 2.0));
+        vec2 p = vUv - vec2(0.5) - tilt * 0.95;
+        float slope = 0.35 + tilt.y * 0.3;
+        float band = exp(-pow((p.x + p.y * slope - 0.30) / 0.085, 2.0));
+        float second = exp(-pow((p.x + p.y * slope + 0.40) / 0.025, 2.0));
         float edge = smoothstep(0.0, 0.14, vUv.y) * smoothstep(0.0, 0.14, 1.0-vUv.y);
-        gl_FragColor = vec4(0.84, 0.93, 1.0, (band * 0.065 + second * 0.025) * edge);
+        gl_FragColor = vec4(0.84, 0.93, 1.0, (band * 0.10 + second * 0.035) * edge);
       }`,
   });
 }

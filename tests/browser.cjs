@@ -31,23 +31,30 @@ const assert = require('node:assert/strict');
       if (Math.abs(area(floor.geometry) - 87) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
         throw Error('Seamless wallpaper floor or floor hole missing');
       const side = walls.material;
-      const rims = walls.children.find(m => m.userData.surface === 'rib-rims');
+      const core = walls.children.find(m => m.userData.surface === 'rib-core');
       walls.geometry.computeBoundingBox();
-      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission < 0.9 ||
-          side.ior < 1.49 || side.ior > 1.59 || side.thickness !== 0.1 || side.roughness > 0.12 ||
-          !side.transparent || side.envMapIntensity !== 2.5 || side.roughness !== 0.02 ||
-          !rims || rims.material.opacity !== 0.75 || rims.geometry.userData.rimLevels.length !== 2 ||
+      if (side.transmission !== 1 || side.ior !== 1.52 || side.thickness !== 0.8 ||
+          side.transparent || side.opacity !== 1 || side.roughness !== 0 || side.envMapIntensity !== 3.5 ||
+          walls.geometry.userData.thickness !== 0.16 || walls.geometry.userData.shoulderRadius !== 0.08 ||
+          !core || Math.abs(core.geometry.userData.coreWidth / 0.16 - 0.7) > 1e-6 ||
+          walls.children.some(m => m.userData.surface === 'rib-rims') ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
-        throw Error('Clear rib optics, top edge or height are incorrect');
-      if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)
-        throw Error('PMREM studio environment missing');
-      for (const geometry of [walls.geometry, rims.geometry]) {
+        throw Error('Solid rounded rib, optical material or inner core is incorrect');
+      if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture ||
+          g.scene.environment.userData.whiteBands !== 4)
+        throw Error('Four-band PMREM ceiling environment missing');
+      for (const geometry of [walls.geometry, core.geometry]) {
         if (![...geometry.attributes.position.array, ...geometry.attributes.normal.array].every(Number.isFinite))
           throw Error('Rounded rib contains invalid vertices or normals');
       }
-      rims.geometry.computeBoundingBox();
-      if (Math.abs(rims.geometry.boundingBox.min.y) > 1e-6 || Math.abs(rims.geometry.boundingBox.max.y - 1) > 1e-6)
-        throw Error('Tube rims extend outside the case clearance');
+      if (!g.ribAccents[0].shadow.material.map || g.ribAccents[0].shadow.geometry.type !== 'PlaneGeometry')
+        throw Error('Gradient contact shadow plane missing');
+      const cover = g.floorGroups[0].children.find(m => m.userData.surface === 'lid');
+      if (cover.geometry.type !== 'PlaneGeometry' || !g.lidReflections.length)
+        throw Error('Clear cover plane or moving glare missing');
+      const ctx = floor.material.map.image.getContext('2d');
+      if (ctx.getImageData(96, 48, 1, 1).data[2] - ctx.getImageData(90, 48, 1, 1).data[2] < 15)
+        throw Error('Printed grid refraction cues missing');
       const frame = g.floorGroups[0].children.find(m => m.userData.surface === 'frame');
       if (!frame || frame.material.transparent || frame.material.transmission !== 0 ||
           frame.material.color.getHex() !== 0x269c67) throw Error('Opaque green plastic frame missing');
@@ -55,7 +62,7 @@ const assert = require('node:assert/strict');
       if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
           !g.floorGroups[2].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
         throw Error('Start and goal tile colors are incorrect');
-      const { solidGeometry, setRibFaces } = await import(new URL('./src/case-visuals.js', location.href).href);
+      const { solidGeometry, moldedRibGeometry, moldedCurveGeometry } = await import(new URL('./src/case-visuals.js', location.href).href);
       for (const rectangles of [
         [[0, 0, 100, 100], [100, 0, 200, 100]],
         [[0, 0, 100, 100], [100, 100, 200, 200]],
@@ -64,26 +71,30 @@ const assert = require('node:assert/strict');
         if (Math.abs(area(geometry) - 2) > 0.001) throw Error('Footprint union failed');
         geometry.dispose();
       }
-      const junction = setRibFaces(solidGeometry([
-        [-50, -4.4, 50, 4.4], [-4.4, -4.4, 4.4, 50],
-      ], 1, { bevel: 0.006, fillet: 0.012 }));
+      const junction = moldedRibGeometry([[-58, -8, 58, 8], [-8, -8, 8, 58]], 1, 0.16);
       const mesh = new THREE.Mesh(junction, walls.material);
       const ray = new THREE.Raycaster(new THREE.Vector3(0.013, 2, 0.017), new THREE.Vector3(0, -1, 0));
       const tops = ray.intersectObject(mesh).filter(hit => hit.face.normal.y > 0.35);
-      if (junction.groups.length !== 1 || tops.length !== 1 || Math.abs(tops[0].point.y - 1) > 1e-6)
-        throw Error('Rib junction has a gap or overlapping top faces');
+      if (tops.length !== 1 || tops[0].point.y < 0.97)
+        throw Error('Solid rib junction has a gap or overlapping surface');
       junction.dispose();
-      // A rounded endpoint has no square corner in the top surface.
-      const capsule = solidGeometry([[-53.8, -3.8, 53.8, 3.8]], 1,
-        { bevel: 0.012, fillet: 0.038 });
+      const capsule = moldedRibGeometry([[-58, -8, 58, 8]], 1, 0.16);
       const capMesh = new THREE.Mesh(capsule, walls.material);
-      ray.set(new THREE.Vector3(0.531, 2, 0.031), new THREE.Vector3(0, -1, 0));
-      if (ray.intersectObject(capMesh).some(hit => hit.point.y > 0.999))
-        throw Error('Rib end is square rather than semicircular');
-      ray.set(new THREE.Vector3(0.535, 2, 0), new THREE.Vector3(0, -1, 0));
-      if (!ray.intersectObject(capMesh).some(hit => hit.point.y > 0.999))
-        throw Error('Rounded endpoint is missing');
+      ray.set(new THREE.Vector3(0.565, 2, 0.06), new THREE.Vector3(0, -1, 0));
+      if (ray.intersectObject(capMesh).length) throw Error('Rib end has square corners');
+      ray.set(new THREE.Vector3(0, 2, 0.06), new THREE.Vector3(0, -1, 0));
+      const shoulder = ray.intersectObject(capMesh)[0];
+      if (!shoulder || shoulder.point.y < 0.96 || shoulder.point.y > 0.985)
+        throw Error('Shoulder is not rounded across the whole half-thickness');
+      ray.set(new THREE.Vector3(0.575, 2, 0), new THREE.Vector3(0, -1, 0));
+      if (!ray.intersectObject(capMesh).some(hit => hit.point.y > 0.9))
+        throw Error('Dome-shaped endpoint missing');
       capsule.dispose();
+      const curved = moldedCurveGeometry(Math.PI / 2, 1, 0.16);
+      if (![...curved.attributes.position.array, ...curved.attributes.normal.array].every(Number.isFinite))
+        throw Error('Curved molded wall is invalid');
+      curved.dispose();
+
     });
     // Off-axis projection must pin the lid at every tilt, floor and viewport.
     for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
@@ -119,7 +130,7 @@ const assert = require('node:assert/strict');
         const tiltedShadow = accent.shadow.position.clone();
         g.tilt = { x: 0, z: 0 };
         g.setLighting();
-        if (accent.shadow.position.distanceTo(tiltedShadow) < 0.02)
+        if (accent.shadow.position.distanceTo(tiltedShadow) < 0.01)
           throw Error('Rib contact shadow does not follow lighting');
       });
     }
@@ -129,7 +140,7 @@ const assert = require('node:assert/strict');
       const perimeter = original.floors[0].walls.filter(w =>
         w.axis === 'h' ? w.z === 0 || w.z === 11 : w.x === 0 || w.x === 8);
       const corridor = [5, 6].flatMap(z => Array.from({ length: 8 }, (_, x) => ({ axis: 'h', x, z })));
-      for (const [size, radius] of [['S', 0.35], ['M', 0.4], ['L', 0.45]]) {
+      for (const [size, radius] of [['S', 0.3], ['M', 0.35], ['L', 0.4]]) {
         g.load({ ...original, size, balls: [{ x: 4, z: 5 }],
           floors: [{ dark: false, cells: [], walls: [...perimeter, ...corridor] }] }, false);
         const b = g.balls[0], start = b.body.translation().x;
@@ -156,7 +167,7 @@ const assert = require('node:assert/strict');
         const b = g.balls[0];
         b.floor = fi;
         b.collider.setCollisionGroups((1 << 16) | 1 | (1 << (fi + 1)));
-        b.body.setTranslation({ x: 0.5, y: -fi * 3 + 0.46, z: 0 }, true);
+        b.body.setTranslation({ x: 0.5, y: -fi * 3 + 0.41, z: 0 }, true);
         b.body.setLinvel({ x: 0, y: 6, z: 0 }, true);
         for (let i = 0; i < 6; i++) {
           g.step(1 / 60);
