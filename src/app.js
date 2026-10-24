@@ -31,7 +31,7 @@ const game = new Game($('#viewport'), sound, {
     $('#limit').textContent = ` / ${stage.limit}s`;
     $('#replay-label').hidden = true;
     $('#video').disabled = true;
-    $('#video').textContent = '録画を準備中…';
+    $('#video').textContent = 'リプレイから動画を作る';
     $('#qr').hidden = true;
     $('#status').textContent = '開始ボタンでスタート';
     $('#start-panel').hidden = false;
@@ -67,7 +67,7 @@ const game = new Game($('#viewport'), sound, {
     $('#start-panel').hidden = true;
     closeDialogs();
     $('#replay-label').hidden = false;
-    $('#status').textContent = '玉の光だけで、直前の出来事を振り返る';
+    $('#status').textContent = 'リプレイ再生中 · 下段の玉の位置は波紋で表示';
   },
   replayEnd(r) {
     $('#replay-label').hidden = true;
@@ -75,7 +75,7 @@ const game = new Game($('#viewport'), sound, {
   },
   video(blob) {
     $('#video').disabled = !blob;
-    $('#video').textContent = blob ? '録画を保存 / 共有' : 'このブラウザは録画非対応';
+    $('#video').textContent = blob ? '動画を保存 / 共有' : 'このブラウザは録画非対応';
   },
 });
 const wallPanel = document.createElement('details');
@@ -157,6 +157,9 @@ function showResult(r) {
   $('#result-tag').textContent = r.won ? 'MISSION COMPLETE' : 'SIGNAL LOST';
   $('#result-title').textContent = r.won ? '光の先に、到着。' : 'もう一度、そっと。';
   $('#result-detail').textContent = `${r.reason} · ${r.time.toFixed(2)}秒`;
+  $('#video').disabled = !game.canExportVideo() || game.logCount < 2 || !!game.exportingVideo;
+  $('#video').textContent = game.exportingVideo ? '動画を仕上げています…'
+    : game.recordedBlob ? '動画を保存 / 共有' : game.canExportVideo() ? 'リプレイから動画を作る' : 'このブラウザは動画出力非対応';
   if (!$('#result').open) $('#result').showModal();
 }
 async function play(s, quest = false) {
@@ -282,7 +285,11 @@ $('#favorite').onclick = () =>
     .catch(() => toast('保存できませんでした'));
 $('#video').onclick = async () => {
   const blob = game.recordedBlob;
-  if (!blob) return;
+  if (!blob) {
+    if (!game.exportReplayVideo()) toast('動画を作成できませんでした');
+    else toast('リプレイを再生して動画を作成します');
+    return;
+  }
   const file = new File(
     [blob],
     `toukan-${Date.now()}.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`,

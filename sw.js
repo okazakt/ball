@@ -1,4 +1,4 @@
-const CACHE = 'toukan-2.0.2+7eb42c020c65';
+const CACHE = 'toukan-2.0.3+5715bb442a9d';
 const ASSETS = [
   './',
   './index.html',

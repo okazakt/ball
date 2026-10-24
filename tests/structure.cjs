@@ -46,16 +46,19 @@ const fs = require('node:fs');
    for(let i=0;i<40&&!b.done;i++)g.step(1/60);check(b.done,'Actual goal contact did not complete');
   }
   g.load(defaultStage(),false);g.sync();document.querySelectorAll('dialog[open]').forEach(d=>d.close());document.querySelector('#start-panel').hidden=true;
-  const frames=g.floorGroups.map(f=>{const m=f.children.find(m=>m.userData.surface==='frame');m.geometry.computeBoundingBox();return {minX:m.geometry.boundingBox.min.x,maxX:m.geometry.boundingBox.max.x,minZ:m.geometry.boundingBox.min.z,maxZ:m.geometry.boundingBox.max.z}});
-  check(JSON.stringify(frames[0])===JSON.stringify(frames[1]),'Upper/lower exterior planes differ');
-  for(const d of g.doors){check(Math.abs(d.z-cellCenter(d.c.x,d.c.z).z+.332)<1e-6,'Initial door not beside upper wall');check(g.floorGroups[d.fi].children.some(m=>m.userData.surface==='door-groove'&&m.material.color.getHex()===0x010203),'Missing black groove bottom');}
-  return {roundHole:true,joinedRamps:4,contactGoals:4,fixedWalls:g.wallSettings,frames};
+  const frames=[];g.board.traverse(m=>{if(m.userData.surface==='frame'){m.geometry.computeBoundingBox();frames.push(m)}});
+  check(frames.length===1,'Exterior must be one shell');
+  const bounds=frames[0].geometry.boundingBox;
+  check(Math.abs(bounds.min.y+frames[0].position.y+GAP+.24)<1e-5&&Math.abs(bounds.max.y+frames[0].position.y-1.07)<1e-5,'Shell does not span both floors');
+  check(!g.floorGroups.some(f=>f.children.some(m=>m.userData.surface==='door-groove')),'Artificial black slot remains');
+  for(const d of g.doors)check(Math.abs(d.z-cellCenter(d.c.x,d.c.z).z+.332)<1e-6,'Initial door not beside upper wall');
+  return {roundHole:true,joinedRamps:4,contactGoals:4,fixedWalls:g.wallSettings,shells:frames.length};
  });
  console.log(JSON.stringify(result));assert.deepEqual(errors,[]);
- fs.mkdirSync('/workspace/ball-captures/v2.0.2',{recursive:true});
+ fs.mkdirSync('/workspace/ball-captures/v2.0.3',{recursive:true});
  for(const [name,tilt] of [['flat',{x:0,z:0}],['tilted',{x:-.48,z:.24}]]){
   await page.evaluate(tilt=>{const g=window.__toukan.game;g.tilt=tilt;g.renderScene()},tilt);
-  await page.screenshot({path:`/workspace/ball-captures/v2.0.2/${name}.png`});
+  await page.screenshot({path:`/workspace/ball-captures/v2.0.3/${name}.png`});
  }
  console.log('PASS structure, contacts and captures');
  }finally{await browser.close()}

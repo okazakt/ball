@@ -102,6 +102,9 @@ export class Game {
     this.host.prepend(this.renderer.domElement);
     this.ambient = new T.HemisphereLight(0xc3e9ff, 0x103140, 0.875);
     this.scene.add(this.ambient);
+    this.lowerAmbient = new T.HemisphereLight(0x8199ad,0x080b12,.035);
+    this.lowerAmbient.layers.set(2);
+    this.scene.add(this.lowerAmbient);
     this.sun = new T.DirectionalLight(0xffecd0, 3.0);
     this.sun.position.set(4, 12, 3);
     this.sun.castShadow = true;
@@ -212,7 +215,7 @@ export class Game {
     if (stage.floors.length !== 2) throw Error('上段・下段の2段構造にしてください');
     if (!['S', 'M'].includes(stage.size)) throw Error('玉サイズはSまたはMを指定してください');
     clearTimeout(this.wallGeometryTimer);
-    this.stopRecording();
+    this.stopRecording(true);
     this.queue?.free();
     this.world?.free();
     while (this.board.children.length) {
@@ -310,15 +313,15 @@ export class Game {
         x += w.x === 0 ? -2.5 : 2.5;
         return [x - 5, z - 7.5, x + 5, z + 107.5];
       });
-      if (frameRects.length) {
+      if (frameRects.length && fi === 0) {
         const frameMat = new T.MeshPhysicalMaterial({
           color: 0x269c67, roughness: 0.1, metalness: 0,
           transmission: 0, opacity: 1, transparent: false,
           clearcoat: 1, clearcoatRoughness: 0.03, ior: 1.52, envMapIntensity: 2.0,
         });
-        // Extend through the slab: upper/lower exterior faces share one plane.
-        const frame = this.mesh(solidGeometry(frameRects, LID_Y + FLOOR_THICKNESS, { bevel: 0.025, fillet: 0.045 }),
-          frameMat, 0, y - FLOOR_THICKNESS, 0, fi);
+        // One continuous shell, without bevels or caps at the floor junction.
+        const frame = this.mesh(solidGeometry(frameRects, GAP + LID_Y + FLOOR_THICKNESS, { bevel: 0.025, fillet: 0.045 }),
+          frameMat, 0, -GAP - FLOOR_THICKNESS, 0, fi);
         frame.userData.surface = 'frame';
         frame.castShadow = false;
       }
@@ -606,12 +609,6 @@ export class Game {
     const post = this.mesh(new T.CylinderGeometry(.065,.065,spec.postHeight,16),this.casePlastic(),spec.x,spec.postY,spec.z,1);
     post.userData.dynamic = true; post.userData.surface = 'door-post'; post.castShadow = false;
     this.doors.push({ c, fi, ...spec, body, collider, postCollider, mesh, post, slide: 0, nextSlide: 0, open: false });
-    // An unlit bottom to the narrow channel occludes the lower floor pattern.
-    const [x0,z0,x1,z1] = spec.groove;
-    const shade = this.mesh(new T.PlaneGeometry(x1-x0,z1-z0),
-      new T.MeshBasicMaterial({color:0x010203,side:T.DoubleSide}),
-      (x0+x1)/2,spec.y-FLOOR_THICKNESS-.005,(z0+z1)/2,fi);
-    shade.rotation.x = -Math.PI/2; shade.userData.surface = 'door-groove';
   }
   setDoorVisual(door, slide) {
     door.slide = slide;
@@ -653,7 +650,6 @@ export class Game {
     this.last = performance.now();
     this.balls.forEach((b) => b.body.wakeUp());
     this.state = 'playing';
-    this.startRecording();
   }
   batchFloor(group) {
     const buckets = new Map();
@@ -899,25 +895,6 @@ export class Game {
     if (power < 0.25) return;
     this.noise = Math.max(this.noise, Math.min(1, power * 0.45));
     this.sound.tone(power);
-    if (this.elapsed - this.lastRipple > 0.1) {
-      this.lastRipple = this.elapsed;
-      const mesh = this.mesh(
-        new T.RingGeometry(0.15, 0.175, 24),
-        new T.MeshBasicMaterial({
-          color: 0xffc17c,
-          transparent: true,
-          opacity: 0.7,
-          side: T.DoubleSide,
-          depthWrite: false,
-        }),
-        p.x,
-        -fi * GAP + 0.045,
-        p.z,
-        fi
-      );
-      mesh.rotation.x = -Math.PI / 2;
-      this.ripples.push({ mesh, age: 0, power });
-    }
     for (const e of this.enemies)
       if (e.fi === fi && Math.hypot(e.x - p.x, e.z - p.z) < power * 2.5) {
         e.target = { x: p.x, z: p.z };
@@ -1196,16 +1173,19 @@ export class Game {
   }
   setLighting() {
     const fi = this.viewFloor;
-    for (const b of this.balls)
-      b.mesh.visible = !(b.displayDone ?? b.done) && (b.displayFloor ?? b.floor) >= fi;
+    for (const b of this.balls) {
+      b.mesh.visible = !(b.displayDone ?? b.done);
+      b.mesh.material.visible = (b.displayFloor ?? b.floor) === 0;
+    }
     this.floorGroups.forEach((g, i) => (g.visible = i >= fi));
     this.ambient.layers.disableAll();
     this.sun.layers.disableAll();
-    for (let i = 0; i < this.stage.floors.length; i++)
+    for (let i = 0; i < 1; i++)
       if (!this.stage.floors[i].dark) {
         this.ambient.layers.enable(i + 1);
         this.sun.layers.enable(i + 1);
       }
+    this.lowerAmbient.visible = !this.stage.floors[1].dark;
     this.sun.position.set(4 + this.tilt.z * 12, 12 - fi * GAP, 3 + this.tilt.x * 10);
     this.sunTarget.position.set(0, -fi * GAP, 0);
     this.board.rotation.set(0, 0, 0);
@@ -1251,6 +1231,30 @@ export class Game {
       this.renderer.render(this.scene, this.camera);
     }
   }
+  updateLowerRipples(dt) {
+    for (const b of this.balls) {
+      if (!['playing','replay'].includes(this.state) || (b.displayFloor ?? b.floor) !== 1 || (b.displayDone ?? b.done)) {
+        b.rippleClock = 0; continue;
+      }
+      b.rippleClock = (b.rippleClock ?? 0) - dt;
+      if (b.rippleClock > 0) continue;
+      b.rippleClock = .4;
+      const mesh = this.mesh(new T.RingGeometry(.12,.145,32),
+        new T.MeshBasicMaterial({color:0xffc17c,transparent:true,opacity:.7,
+          depthTest:false,depthWrite:false,side:T.DoubleSide}),
+        b.mesh.position.x,.025,b.mesh.position.z,0);
+      mesh.rotation.x = -Math.PI/2; mesh.renderOrder = 1000;
+      mesh.userData.surface = 'lower-ball-ripple';
+      this.ripples.push({mesh,age:0});
+    }
+  }
+  clearRipples() {
+    for (const r of this.ripples) {
+      r.mesh.parent?.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose();
+    }
+    this.ripples = [];
+    this.balls.forEach(b => { b.rippleClock = 0; });
+  }
   loop(now) {
     requestAnimationFrame((t) => this.loop(t));
     const dt = Math.min(0.1, (now - this.last) / 1000);
@@ -1267,6 +1271,7 @@ export class Game {
       this.sound.roll(0);
       if (this.state === 'replay') this.updateReplay(dt);
     }
+    this.updateLowerRipples(dt);
     for (const r of this.ripples) {
       r.age += dt;
       r.mesh.scale.setScalar(1 + r.age * 7);
@@ -1341,6 +1346,8 @@ export class Game {
   }
   playReplay(full = false) {
     if (!this.outcome || this.logCount < 2) return;
+    if (this.exportingVideo) this.stopRecording(true);
+    this.clearRipples();
     clearTimeout(this.autoReplay);
     this.events.replaying?.();
     this.replay = this.exportLog();
@@ -1425,17 +1432,32 @@ export class Game {
       }
       if (this.replayFinishTime > 1) {
         this.state = 'finished';
+        if (this.exportingVideo) this.stopRecording();
         this.events.replayEnd?.(this.outcome);
       }
     }
   }
+  canExportVideo() {
+    return !!(this.renderer?.domElement.captureStream && window.MediaRecorder);
+  }
+  exportReplayVideo() {
+    if (!this.canExportVideo() || !this.outcome || this.logCount < 2 || this.exportingVideo) return false;
+    this.playReplay(true);
+    this.exportingVideo = true;
+    if (this.startRecording()) return true;
+    this.exportingVideo = false;
+    this.state = 'finished';
+    this.events.replayEnd?.(this.outcome);
+    return false;
+  }
   startRecording() {
     if (!this.renderer.domElement.captureStream || !window.MediaRecorder) {
       this.events.video?.(null);
-      return;
+      return false;
     }
+    let stream;
     try {
-      const stream = this.renderer.domElement.captureStream(30);
+      stream = this.renderer.domElement.captureStream(30);
       const mime = ['video/mp4', 'video/webm;codecs=vp8', 'video/webm'].find((t) =>
         MediaRecorder.isTypeSupported(t)
       );
@@ -1445,22 +1467,36 @@ export class Game {
         ),
         chunks = [];
       this.recorder = recorder;
+      this.recordingStream = stream;
       recorder.ondataavailable = (e) => {
         if (e.data.size) chunks.push(e.data);
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         if (this.recorder !== recorder) return;
+        this.recorder = null;
+        this.recordingStream = null;
+        this.exportingVideo = false;
+        if (recorder.discard) return;
         this.recordedBlob = new Blob(chunks, { type: recorder.mimeType });
         this.events.video?.(this.recordedBlob);
       };
-      recorder.onerror = () => this.events.video?.(null);
+      recorder.onerror = () => { this.stopRecording(true); this.events.video?.(null); };
       recorder.start(1000);
+      return true;
     } catch {
+      stream?.getTracks().forEach(t => t.stop());
+      this.recorder = null; this.recordingStream = null;
       this.events.video?.(null);
+      return false;
     }
   }
-  stopRecording() {
-    if (this.recorder?.state === 'recording') this.recorder.stop();
+  stopRecording(discard = false) {
+    if (discard) {
+      this.exportingVideo = false;
+      if (this.recorder) this.recorder.discard = true;
+    }
+    if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
+    if (discard) this.recordingStream?.getTracks().forEach(t => t.stop());
   }
 }
