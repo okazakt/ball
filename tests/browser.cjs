@@ -31,12 +31,14 @@ const assert = require('node:assert/strict');
       if (Math.abs(area(floor.geometry) - 87) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
         throw Error('Seamless wallpaper floor or floor hole missing');
       const side = walls.material;
-      if (walls.children.length || g.floorGroups.some(group => group.children.some(m => ['rib-rims', 'rib-accent'].includes(m.userData.surface))))
-        throw Error('Separate wall highlight meshes remain');
+      if (walls.children.length !== 2 || !walls.children.some(m => m.userData.surface === 'top-rib') ||
+          !walls.children.some(m => m.userData.surface === 'bottom-rib'))
+        throw Error('Clear wall edge ribs missing');
       walls.geometry.computeBoundingBox();
-      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission !== 0.4 ||
+      if (area(walls.geometry) < 0.5 || area(walls.geometry) > 12 || side.transmission !== 0 ||
           side.ior !== 1.05 || side.thickness !== 0.02 || side.roughness > 0.12 ||
-          side.transparent || side.envMapIntensity !== 3.5 || side.roughness !== 0.1 || side.metalness !== 0.1 ||
+          !side.transparent || side.opacity !== 0.18 || side.color.getHex() !== 0xe8f4ff ||
+          side.envMapIntensity !== 3.5 || side.roughness !== 0.05 || side.metalness !== 0.1 ||
           Math.abs(walls.geometry.boundingBox.max.y - 1) > 1e-6)
         throw Error('Clear rib optics, top edge or height are incorrect');
       if (!g.scene.environment?.isTexture || !g.environmentTarget?.texture.isRenderTargetTexture)

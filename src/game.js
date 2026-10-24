@@ -1,5 +1,5 @@
 import { COLS, ROWS, GAP } from './stage.js';
-import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, setRibFaces, smoothMoldedNormals, studioEnvironment } from './case-visuals.js';
+import { solidGeometry, spaceTexture, lidReflectionMaterial, ribMaterials, addClearRibs, setRibFaces, smoothMoldedNormals, studioEnvironment } from './case-visuals.js';
 const T = window.THREE,
   GRAVITY = 32,
   TILT_GRAVITY = 51,
@@ -227,6 +227,7 @@ export class Game {
         const walls = this.mesh(setRibFaces(solidGeometry(wallRects, 1, { bevel: 0.012, fillet: 0.038 })), wall, 0, y, 0, fi);
         walls.castShadow = false;
         walls.userData.surface = 'walls';
+        addClearRibs(walls);
       }
       const frameRects = f.walls.filter(perimeter).map(w => {
         let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
@@ -377,6 +378,7 @@ export class Game {
           const mesh = this.mesh(setRibFaces(doorGeometry), wall, p.x, y + 0.5, p.z, fi);
           mesh.castShadow = false;
           mesh.userData.dynamic = true;
+          addClearRibs(mesh);
           this.doors.push({ body, mesh, fi, c, y, open: false });
         }
         if (c.type === 'corner') {
@@ -395,6 +397,7 @@ export class Game {
           const corner = this.mesh(geometry, wall, p.x, y, p.z, fi);
           corner.castShadow = false;
           corner.userData.surface = 'walls';
+          addClearRibs(corner, -((c.rotation || 0) * Math.PI) / 2);
           const vertices = geometry.attributes.position.array;
           this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,
             Uint32Array.from({ length: vertices.length / 3 }, (_, i) => i))

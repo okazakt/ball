@@ -86,10 +86,39 @@ test('rounded plastic ribs remain valid at every grid placement', async () => {
       geometry.dispose();
     }
   const material = ribMaterials();
-  assert.equal(material.transmission, .4);
+  assert.equal(material.transmission, 0);
   assert.equal(material.ior, 1.05);
   assert.equal(material.thickness, 0.02);
-  assert.equal(material.roughness, .1);
+  assert.equal(material.roughness, .05);
   assert.equal(material.metalness, .1);
+  assert.equal(material.opacity, .18);
+  assert.equal(material.transparent, true);
   material.dispose();
+});
+
+test('clear ribs follow the united outline and stay attached to a moving wall', async () => {
+  const { solidGeometry, ribMaterials, addClearRibs } = await import('../src/case-visuals.js');
+  const T = context.THREE;
+  const geometry = solidGeometry([[-50, -3.8, 50, 3.8], [-3.8, -3.8, 3.8, 50]], 1,
+    { bevel: .012, fillet: .038 });
+  geometry.translate(0, -.5, 0);
+  const wall = new T.Mesh(geometry, ribMaterials());
+  wall.layers.set(2);
+  addClearRibs(wall);
+  assert.equal(wall.children.length, 2);
+  for (const [i, rib] of wall.children.entries()) {
+    assert.ok([...rib.geometry.attributes.position.array, ...rib.geometry.attributes.normal.array].every(Number.isFinite));
+    rib.geometry.computeBoundingBox();
+    const box = rib.geometry.boundingBox;
+    assert.ok(Math.abs((i === 0 ? box.max.y : box.min.y) - (i === 0 ? .5 : -.5)) < 1e-6);
+    assert.equal(rib.material.opacity, i === 0 ? .75 : .45);
+    assert.equal(rib.layers.mask, wall.layers.mask);
+    assert.equal(rib.castShadow, false);
+    assert.equal(rib.receiveShadow, false);
+    wall.position.y = 2;
+    wall.updateMatrixWorld(true);
+    assert.equal(rib.getWorldPosition(new T.Vector3()).y, 2);
+    rib.geometry.dispose(); rib.material.dispose();
+  }
+  geometry.dispose(); wall.material.dispose();
 });
