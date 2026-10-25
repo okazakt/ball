@@ -87,6 +87,7 @@ export function validateStage(s, { allowIncomplete = false } = {}) {
       typeof f.dark !== 'boolean'
     )
       throw Error('フロア形式が正しくありません');
+    if (f.windows !== undefined && (!Array.isArray(f.windows) || i !== 0 || f.windows.length > COLS * ROWS || !f.windows.every(cell) || new Set(f.windows.map(p => `${p.x}:${p.z}`)).size !== f.windows.length)) throw Error('半透明床の位置が正しくありません');
     const keys = new Set();
     for (const w of f.walls) {
       if (
@@ -177,6 +178,7 @@ export function encodeStage(s) {
         c.rotation ?? 0,
         ['right', 'left', 'random'].indexOf(c.rule ?? 'right'),
       ]),
+      f.windows ?? [],
     ]),
   };
   const bytes = new TextEncoder().encode(JSON.stringify(compact));
@@ -213,6 +215,7 @@ export function decodeStage(input) {
         balls: d.b.map(b => ({ x: b[0], z: b[1], floor: b[2] ?? 0 })),
         floors: d.f.map((f) => ({
           dark: !!f[0],
+          ...(f[3]?.length ? { windows: f[3] } : {}),
           walls: f[1].map((w) => ({ axis: w[0] === 0 ? 'h' : 'v', x: w[1], z: w[2] })),
           cells: f[2].map((c) => ({
             x: c[0],

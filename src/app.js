@@ -1,9 +1,10 @@
+import { QUESTS, questStage } from './quests.js';
 import { keepScreenAwake } from './wake-lock.js';
 import { VERSION } from './version.js';
 import { Game } from './game.js';
 import { Sound } from './audio.js';
 import { Editor } from './editor.js';
-import { defaultStage, decodeStage, stageURL, validateStage } from './stage.js';
+import { decodeStage, stageURL, validateStage } from './stage.js';
 import * as store from './storage.js';
 const $ = (s) => document.querySelector(s);
 keepScreenAwake();
@@ -11,7 +12,8 @@ const displayVersion = VERSION.split('+')[0];
 $('#app-version').textContent = `v${displayVersion}`;
 $('#menu-version').textContent = `表示中のバージョン：v${displayVersion}`;
 let toastTimer,
-  stage = defaultStage(),
+  stage = questStage(0),
+  questIndex = 0,
   lastResult;
 function toast(text) {
   $('#toast').textContent = text;
@@ -32,7 +34,7 @@ const game = new Game($('#viewport'), sound, {
     $('#video').disabled = true;
     $('#video').textContent = 'リプレイから動画を作る';
     $('#qr').hidden = true;
-    $('#status').textContent = '開始ボタンでスタート';
+    $('#status').textContent = game.quest ? QUESTS[questIndex].hint : '開始ボタンでスタート';
     $('#start-panel').hidden = false;
   },
   frame(g) {
@@ -78,6 +80,7 @@ const game = new Game($('#viewport'), sound, {
   },
 });
 function showResult(r) {
+  $('#next-quest').hidden = !r.won || !game.quest || questIndex >= QUESTS.length-1;
   $('#result-tag').textContent = r.won ? 'MISSION COMPLETE' : 'SIGNAL LOST';
   $('#result-title').textContent = r.won ? '光の先に、到着。' : 'もう一度、そっと。';
   $('#result-detail').textContent = `${r.reason} · ${r.time.toFixed(2)}秒`;
@@ -144,7 +147,13 @@ $('#gyro').onclick = async () => {
     toast(e.message);
   }
 };
-$('#quest').onclick = () => play(defaultStage(), true);
+$('#quest').onclick = () => { closeDialogs(); $('#quest-dialog').showModal(); };
+for (const [index, quest] of QUESTS.entries()) {
+  const button=document.createElement('button'); button.textContent=quest.name;
+  button.onclick=()=>{questIndex=index;play(questStage(index),true);};
+  $('#quest-list').append(button);
+}
+$('#next-quest').onclick=()=>{questIndex++;play(questStage(questIndex),true);};
 $('#edit').onclick = () => {
   closeDialogs();
   editor.open(stage);

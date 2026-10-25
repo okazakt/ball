@@ -309,8 +309,14 @@ export class Game {
       for (const [x0,z0,x1,z1] of floorRects)
         this.world.createCollider(this.R.ColliderDesc.cuboid((x1-x0)/2, FLOOR_THICKNESS/2, (z1-z0)/2)
           .setTranslation((x0+x1)/2, y-FLOOR_THICKNESS/2, (z0+z1)/2).setFriction(0.1).setRestitution(0.1));
-      if (floorRects.length) {
-        const floorGeo = solidGeometry(floorRects.map(rect => rect.map(v => v * 100)), FLOOR_THICKNESS);
+      const windows = new Set((f.windows ?? []).map(p => `${p.x}:${p.z}`));
+      const opaqueRects = floorRects.filter(([x,z]) => !windows.has(`${Math.floor(x+COLS/2)}:${Math.floor(z+ROWS/2)}`));
+      for (const [x0,z0,x1,z1] of floorRects.filter(r => !opaqueRects.includes(r))) {
+        const mat = new T.MeshStandardMaterial({color:0xb4e6df,transparent:true,opacity:.22,depthWrite:false,roughness:.25});
+        this.mesh(new T.BoxGeometry(x1-x0,FLOOR_THICKNESS,z1-z0),mat,(x0+x1)/2,y-FLOOR_THICKNESS/2,(z0+z1)/2,fi);
+      }
+      if (opaqueRects.length) {
+        const floorGeo = solidGeometry(opaqueRects.map(rect => rect.map(v => v * 100)), FLOOR_THICKNESS);
         const positions = floorGeo.attributes.position, uvs = floorGeo.attributes.uv;
         for (let i = 0; i < positions.count; i++)
           uvs.setXY(i, positions.getX(i) / COLS + 0.5, 0.5 - positions.getZ(i) / ROWS);
@@ -1134,7 +1140,7 @@ export class Game {
           dz = p.z - e.z,
           d = Math.hypot(dx, dz);
         if (d < 0.38 + b.radius && Math.abs(p.y + e.fi * GAP) < 0.8) {
-          this.finish(false, 'ゼリーに回収されました', b);
+          this.finish(false, e.c.type === 'robot' ? '警備ロボットに捕まりました' : 'ゼリーに回収されました', b);
           return;
         }
         if (
