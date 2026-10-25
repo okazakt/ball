@@ -740,51 +740,48 @@ export class Game {
           float goalAcross = dot(goalDelta,vec2(-goalPaintDirection.y,goalPaintDirection.x));
           bool goalReveal = goalAlong > .35 && goalAlong < .70 &&
             ${kind === 'frame' ? 'abs(goalAcross) > .34 && abs(goalAcross) < .66' : 'abs(goalAcross) < .50'};
-          if (goalReveal) {
-            float goalHeight = vGoalPaintPosition.y-goalPaintFloorY;
-            float goalPath = ${kind === 'frame' ? 'sign(goalAcross)*(.30+.125*1.57079632679+max(0.,goalHeight-.125))' : 'goalAcross'};
-            float goalStripe = (goalPath+.3)*10.;
-            gl_FragColor = vec4(mod(floor(goalStripe),2.) < 1. ? vec3(1.,0.,0.) : vec3(1.),1.);
-            ${kind === 'frame' ? 'if (goalHeight > goalPaintTopY-.06) gl_FragColor = vec4(1.,0.,0.,1.);' : ''}
-          }
+          ${kind === 'frame' ? 'if (goalReveal) discard;' : ''}
+
         `);
       };
-      material.customProgramCacheKey = () => previousKey()+'-goal-reveal-curved-v2-'+kind;
+      material.customProgramCacheKey = () => previousKey()+'-goal-reveal-unified-v3-'+kind;
       material.needsUpdate = true;
       material.userData.goalPaint = kind;
     }
   }
   createGoalExit(cell, y, fi) {
     this.goalSurfaces.push({cell,fi});
-    const p=cellPos(cell.x,cell.z), [dx,dz]=direction(cell), radius=.125;
-    // Quarter-circle coves join the threshold to each jamb. One arc-length
-    // coordinate carries the stripes continuously from floor to curve to wall.
-    for (const side of [-1,1]) {
-      const positions=[], paths=[], indices=[], steps=32;
-      for(let i=0;i<=steps;i++) {
-        const angle=i/steps*Math.PI/2;
-        const across=side*(.30+radius*Math.sin(angle));
-        const height=radius*(1-Math.cos(angle));
-        for(const along of [.35,.60]) {
-          positions.push(p.x+dx*along-dz*across,y+height+.001,p.z+dz*along+dx*across);
-          paths.push(side*(.30+radius*angle));
-        }
-        if(i<steps) {const k=i*2;indices.push(k,k+1,k+2,k+1,k+3,k+2);}
-      }
-      const geometry=new T.BufferGeometry();
-      geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
-      geometry.setAttribute('goalPath',new T.Float32BufferAttribute(paths,1));
-      geometry.setIndex(indices);geometry.computeVertexNormals();
-      const material=new T.ShaderMaterial({
-        side:T.DoubleSide,toneMapped:false,
-        vertexShader:'attribute float goalPath; varying float vGoalPath; void main(){vGoalPath=goalPath;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-        fragmentShader:'varying float vGoalPath; void main(){float s=mod(floor((vGoalPath+.3)*10.),2.);gl_FragColor=vec4(s<1.?vec3(1.,0.,0.):vec3(1.),1.);}'
-      });
-      const cove=this.mesh(geometry,material,0,0,0,fi);
-      cove.castShadow=cove.receiveShadow=false;
-      cove.userData.surface='goal-curve';
+    const p=cellPos(cell.x,cell.z), [dx,dz]=direction(cell);
+    const radius=.125, height=fi === 0 ? LID_Y+FLOOR_THICKNESS : GAP;
+    // One extruded U section: threshold, tangent quarter-circles and jambs
+    // share the same depth and vertices, so neither corner can form a ledge.
+    const shape=new T.Shape();
+    shape.moveTo(-.66,-FLOOR_THICKNESS);shape.lineTo(.66,-FLOOR_THICKNESS);
+    shape.lineTo(.66,height);shape.lineTo(.425,height);shape.lineTo(.425,radius);
+    shape.absarc(.30,radius,radius,0,-Math.PI/2,true);
+    shape.lineTo(-.30,0);
+    shape.absarc(-.30,radius,radius,-Math.PI/2,-Math.PI,true);
+    shape.lineTo(-.425,height);shape.lineTo(-.66,height);shape.closePath();
+    const geometry=new T.ExtrudeGeometry(shape,{depth:.10,bevelEnabled:false,curveSegments:32});
+    // Shape XY is the cross-section; its extrusion runs through the wall.
+    const position=geometry.attributes.position, path=[];
+    for(let i=0;i<position.count;i++){
+      const across=position.getX(i), h=position.getY(i), along=.475+position.getZ(i);
+      path.push(across,h);
+      position.setXYZ(i,p.x+dx*along-dz*across,y+h+.001,p.z+dz*along+dx*across);
     }
+    geometry.setAttribute('goalPath',new T.Float32BufferAttribute(path,2));
+    geometry.computeVertexNormals();
+    const material=new T.ShaderMaterial({
+      side:T.DoubleSide,toneMapped:false,uniforms:{goalTop:{value:height}},
+      vertexShader:'attribute vec2 goalPath; varying vec2 vGoalPath; void main(){vGoalPath=goalPath;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+      fragmentShader:'uniform float goalTop; varying vec2 vGoalPath; void main(){float a=abs(vGoalPath.x),h=vGoalPath.y;float path=a<=.30?a:h<.125?.30+.125*atan(a-.30,max(0.,.125-h)):.30+.125*1.57079632679+h-.125;path*=sign(vGoalPath.x);float s=mod(floor((path+.3)*10.),2.);vec3 color=s<1.?vec3(1.,0.,0.):vec3(1.);if(vGoalPath.y>goalTop-.06)color=vec3(1.,0.,0.);gl_FragColor=vec4(color,1.);}'
+    });
+    const reveal=this.mesh(geometry,material,0,0,0,fi);
+    reveal.castShadow=reveal.receiveShadow=false;
+    reveal.userData.surface='goal-curve';
   }
+
 
   start() {
     if (this.state !== 'ready') return;
