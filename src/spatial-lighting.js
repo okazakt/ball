@@ -1,6 +1,7 @@
+import { COLS, ROWS, GAP, DIRECTIONS } from './mechanics.js';
 // Keep PBR shading, but give moving objects a continuous lighting field instead
 // of selecting a completely different room's lights at a floor index boundary.
-const T=window.THREE, COUNT=8, tint=new T.Color();
+const T=window.THREE, COUNT=8, RAMP_COUNT=44, tint=new T.Color();
 export function exposureAt(y, radius=.4) {
   const t=Math.max(0,Math.min(1,(y+.24+radius)/(.39+2*radius)));
   return t*t*(3-2*t);
@@ -18,6 +19,7 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
     surfaceLowerSky:{value:new T.Color()},surfaceLowerGround:{value:new T.Color()},
     surfaceUpperEnabled:{value:1},surfaceEnvLevels:{value:new T.Vector2(.015,2)},
     movingApertures:{value:Array.from({length:COUNT},()=>new T.Vector2())},
+    surfaceRampCount:{value:0},surfaceRamps:{value:Array.from({length:RAMP_COUNT},()=>new T.Vector4())},
   });
   material.userData.surfaceField=surfaceField;
   material.userData.spatialUniforms=uniforms;
@@ -30,14 +32,23 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
       shader.fragmentShader=`varying vec3 vSurfaceWorld;
         uniform vec3 surfaceLowerSky, surfaceLowerGround;
         uniform float surfaceUpperEnabled; uniform vec2 surfaceEnvLevels;
-        uniform vec2 movingApertures[${COUNT}];\n`+shader.fragmentShader;
+        uniform vec2 movingApertures[${COUNT}];
+        uniform int surfaceRampCount; uniform vec4 surfaceRamps[${RAMP_COUNT}];\n`+shader.fragmentShader;
     }
     shader.fragmentShader=`uniform vec3 movingSun; uniform vec3 movingSunDirection;
       uniform vec3 movingSky; uniform vec3 movingGround;
       uniform vec3 movingPositions[${COUNT}]; uniform vec3 movingColors[${COUNT}];
       uniform vec3 movingDirections[${COUNT}]; uniform vec4 movingParams[${COUNT}];\n`+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_begin>',`
-      ${surfaceField ? 'float surfaceExposure=smoothstep(-1.24,0.0,vSurfaceWorld.y);' : ''}
+      ${surfaceField ? `float surfaceExposure=smoothstep(${-GAP},0.0,vSurfaceWorld.y);
+        // The open ramp keeps its exterior light down to the landing. Extend
+        // that light onto the floor, then fade by distance into the chamber.
+        for(int r=0;r<${RAMP_COUNT};r++){
+          if(r>=surfaceRampCount)break;
+          vec2 outside=max(abs(vSurfaceWorld.xz-surfaceRamps[r].xy)-surfaceRamps[r].zw,vec2(0.0));
+          float landingLight=1.0-smoothstep(.15,2.25,length(outside));
+          surfaceExposure=max(surfaceExposure,landingLight);
+        }` : ''}
       GeometricContext geometry;
       geometry.position=-vViewPosition; geometry.normal=normal;
       geometry.viewDir=(isOrthographic)?vec3(0.,0.,1.):normalize(vViewPosition);
@@ -77,7 +88,7 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
       #endif
       `);
   };
-  material.customProgramCacheKey=()=> surfaceField ? 'continuous-abs-surface-v1' : 'continuous-room-pbr-v1';
+  material.customProgramCacheKey=()=> surfaceField ? 'continuous-abs-surface-v2' : 'continuous-room-pbr-v1';
   return material;
 }
 export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertureLimited=false) {
@@ -85,6 +96,12 @@ export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertur
   const surfaceField=mesh.material.userData.surfaceField;
   if(surfaceField){
     exposure=1;
+    const ramps=game.stage.floors[0].cells.filter(c=>c.type==='ramp');
+    u.surfaceRampCount.value=Math.min(ramps.length,RAMP_COUNT);
+    for(let i=0;i<u.surfaceRampCount.value;i++){
+      const c=ramps[i],[dx,dz]=DIRECTIONS[c.rotation??0];
+      u.surfaceRamps.value[i].set(c.x-(COLS-1)/2+dx*.5,c.z-(ROWS-1)/2+dz*.5,.5+Math.abs(dx)*.5,.5+Math.abs(dz)*.5);
+    }
     u.surfaceUpperEnabled.value=game.stage.floors[0].dark?0:1;
     u.surfaceLowerSky.value.copy(game.lowerAmbient.color).multiplyScalar(game.lowerAmbient.intensity*(game.stage.floors[1].dark?0:1));
     u.surfaceLowerGround.value.copy(game.lowerAmbient.groundColor).multiplyScalar(game.lowerAmbient.intensity*(game.stage.floors[1].dark?0:1));

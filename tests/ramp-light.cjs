@@ -11,7 +11,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  for(const m of [ramp,floor])if(!m.material.userData.surfaceField||!m.material.userData.frameUniforms)throw Error('Common ABS field missing');
  if(ramp.material.customProgramCacheKey()!==floor.material.customProgramCacheKey())throw Error('Materials use different shading');
  const gl=g.renderer.getContext(),size=g.renderer.getDrawingBufferSize(new T.Vector2());
- const sample=()=>{const p=new T.Vector3(.5,-1.24,2).project(g.camera),data=new Uint8Array(5*5*4);gl.readPixels(Math.round((p.x+1)*size.x/2)-2,Math.round((p.y+1)*size.y/2)-2,5,5,gl.RGBA,gl.UNSIGNED_BYTE,data);return [...data]};
+ const sample=(point=new T.Vector3(.5,-1.24,2))=>{const p=point.clone().project(g.camera),data=new Uint8Array(5*5*4);gl.readPixels(Math.round((p.x+1)*size.x/2)-2,Math.round((p.y+1)*size.y/2)-2,5,5,gl.RGBA,gl.UNSIGNED_BYTE,data);return [...data]};
  const shots=[];
  for(const z of [1,3]){b.body.setTranslation({x:.5,y:-.84,z},true);b.floor=1;g.sync();g.renderScene();shots.push(sample())}
  const ballGlowDelta=Math.max(...shots[0].map((v,i)=>Math.abs(v-shots[1][i])));
@@ -27,8 +27,16 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  }
  const materialSeamDelta=Math.max(...comparison[0].map((v,i)=>Math.abs(v-comparison[1][i])));
  if(materialSeamDelta>2)throw Error('Toe materials differ: '+materialSeamDelta);
+ const toe=new T.Vector3(-3.5,-1.142,4.35);
+ const luma=data=>{let sum=0;for(let i=0;i<data.length;i+=4)sum+=.2126*data[i]+.7152*data[i+1]+.0722*data[i+2];return sum/(data.length/4)};
+ g.renderScene();const landingBright=luma(sample(toe));
+ const rampCells=g.stage.floors[0].cells.filter(c=>c.type==='ramp');
+ for(const c of rampCells)c.type='disabled-ramp-field';
+ g.renderScene();const previousDark=luma(sample(toe));
+ for(const c of rampCells)c.type='ramp';
+ if(landingBright<previousDark+50)throw Error('Ramp toe still dark: '+JSON.stringify({landingBright,previousDark}));
  document.querySelector('#start-panel').hidden=true;g.renderScene();
- return {ballGlowDelta,materialSeamDelta,followingLights:0,rings:g.ripples.length};
+ return {ballGlowDelta,materialSeamDelta,followingLights:0,rings:g.ripples.length,landingBright,previousDark};
  }));
- assert.deepEqual(errors,[]);await page.screenshot({path:'/workspace/ball-captures/2.2.6-ramp.png'});
+ assert.deepEqual(errors,[]);await page.screenshot({path:'/workspace/ball-captures/2.2.7-ramp.png'});
  }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
