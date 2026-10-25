@@ -18,14 +18,19 @@ const assert=require('node:assert/strict');
  const u=m.material[1].userData.frameUniforms;
  for(const [key,value] of Object.entries(g.frameSettings))if(u[key].value!==value)throw Error('ABS settings mismatch');
  }
- for(const m of lower)if(Array.isArray(m.material)||!m.material.map)throw Error('Lower floor changed');
+ const paper=upper[0].material[0];
+ for(const m of lower){
+ if(Array.isArray(m.material)||!m.material.map)throw Error('Lower paper missing');
+ if(m.material.color.getHex()!==paper.color.getHex()||m.material.roughness!==paper.roughness)throw Error('Paper finish differs');
+ if(m.material.map.image.toDataURL()!==paper.map.image.toDataURL())throw Error('Printed pattern differs');
+ }
  g.updateFrameSettings({...g.frameSettings});
  document.querySelector('#start-panel').hidden=true;
  return {version:document.querySelector('#app-version').textContent,upperFloorParts:upper.length,lowerFloorParts:lower.length};
  }));
  for(const [name,tilt] of [['top',{x:0,z:0}],['tilted',{x:.35,z:-.35}]]){
  await page.evaluate(tilt=>{const g=window.__toukan.game;g.tilt=tilt;g.renderScene()},tilt);
- await page.screenshot({path:`/workspace/ball-captures/2.2.2-${name}.png`});
+ await page.screenshot({path:`/workspace/ball-captures/2.2.3-${name}.png`});
  }
  assert.deepEqual(errors,[]);
  }finally{await browser.close()}

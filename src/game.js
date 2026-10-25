@@ -606,17 +606,9 @@ export class Game {
     return [paper, core];
   }
   floorMaterial(fi) {
-    let map = spaceTexture();
-    if (fi > 0) {
-      // Indirect, scattered light below the opaque upper slab.
-      const canvas = document.createElement('canvas');
-      canvas.width = map.image.width; canvas.height = map.image.height;
-      const ctx = canvas.getContext('2d');
-      ctx.filter = 'blur(12px)'; ctx.drawImage(map.image, 0, 0);
-      map.dispose(); map = new T.CanvasTexture(canvas); map.encoding = T.sRGBEncoding;
-    }
-    return new T.MeshStandardMaterial({ color: fi ? 0x606874 : 0xffffff,
-      map, roughness: 1, metalness: 0, envMapIntensity: 0 });
+    // Both floors use the same printed paper. Only the room lighting differs.
+    return new T.MeshStandardMaterial({ color: 0xffffff,
+      map: spaceTexture(), roughness: 1, metalness: 0, envMapIntensity: 0 });
   }
   createHoleFloor(c, y, fi) {
     const p = cellPos(c.x,c.z), shape = new T.Shape();
