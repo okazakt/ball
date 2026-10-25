@@ -4,7 +4,7 @@ const labels = {
   wall: '直線壁',
   corner: '曲面壁',
   erase: '消しゴム',
-  ball: 'スタート／玉',
+  ball: 'ボール初期位置',
   hole: '穴',
   goal: '側面出口（外向き）',
   sticky: '粘着床',
@@ -242,7 +242,6 @@ export class Editor {
       if (cells.length === 2 || t.rotation || t.type === 'door' || t.type === 'goal') c.fillText(['↓','→','↑','←'][t.rotation ?? 0],x+width/2,z+height/2+15);
     }
     for (const b of this.stage.balls) if ((b.floor ?? 0) === this.fi) {
-      c.fillStyle = '#176bff'; c.fillRect(b.x*60+1,b.z*60+1,58,58);
       c.fillStyle = colors.ball; c.beginPath(); c.arc(b.x*60+30,b.z*60+30,11,0,Math.PI*2); c.fill();
     }
     c.strokeStyle = '#7cdaec';

@@ -54,9 +54,10 @@ const assert = require('node:assert/strict');
           g.renderer.toneMappingExposure !== 1.25 || g.sun.intensity !== 3 ||
           g.ambient.intensity !== 0.875 || g.sun.shadow.radius !== 4)
         throw Error('Plastic lighting settings are incorrect');
-      if (!g.floorGroups[0].children.some(m => m.userData.surface === 'start' && m.material.color.getHex() === 0x176bff) ||
-          !g.floorGroups[0].children.some(m => m.userData.surface === 'goal' && m.material.color.getHex() === 0xef334b))
-        throw Error('Start and goal tile colors are incorrect');
+      if (g.floorGroups.some(f => f.children.some(m => ['start','start-bump'].includes(m.userData.surface))))
+        throw Error('Start floor markers remain');
+      if (!g.floorGroups[0].children.some(m => m.userData.surface === 'goal-paint'))
+        throw Error('Side exit paint missing');
       const { solidGeometry, setRibFaces } = await import(new URL('./src/case-visuals.js', location.href).href);
       for (const rectangles of [
         [[0, 0, 100, 100], [100, 0, 200, 100]],

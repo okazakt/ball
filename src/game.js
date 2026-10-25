@@ -1,7 +1,7 @@
 import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, goalEdge, direction } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, HOLE_RADIUS, insideGoal, goalEdge, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -381,8 +381,6 @@ export class Game {
       reflection.userData.dynamic = true;
       this.lidReflections.push(reflection);
       }
-      for (const start of stage.balls) if ((start.floor ?? 0) === fi)
-        this.markCell(start, y, fi, 0x176bff, 'start');
       for (const c of f.cells) {
         const p = cellPos(c.x, c.z);
         if (c.type === 'hole') {
@@ -739,28 +737,6 @@ export class Game {
     }
   }
 
-  markCell(cell, y, fi, color, kind) {
-    const p = cellPos(cell.x, cell.z);
-    const tile = this.mesh(new T.PlaneGeometry(1, 1),
-      new T.MeshBasicMaterial({ color }), p.x, y + 0.004, p.z, fi);
-    tile.rotation.x = -Math.PI / 2;
-    tile.castShadow = tile.receiveShadow = false;
-    tile.userData.surface = kind;
-    // Rounded, low ridges on all four edges. The same radius is used by Rapier.
-    for (const axis of ['x', 'z']) for (const sign of [-1, 1]) {
-      const x = p.x + (axis === 'z' ? sign * MARKER_EDGE : 0);
-      const z = p.z + (axis === 'x' ? sign * MARKER_EDGE : 0);
-      const bump = this.mesh(new T.CylinderGeometry(MARKER_BUMP_RADIUS, MARKER_BUMP_RADIUS, 2 * MARKER_EDGE, 12),
-        new T.MeshStandardMaterial({ color, roughness: .25 }), x, y, z, fi);
-      bump.rotation[axis === 'x' ? 'z' : 'x'] = Math.PI / 2;
-      bump.userData.surface = kind + '-bump';
-      const rotation = axis === 'x' ? { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }
-        : { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 };
-      this.world.createCollider(this.R.ColliderDesc.cylinder(MARKER_EDGE, MARKER_BUMP_RADIUS)
-        .setTranslation(x, y, z).setRotation(rotation).setFriction(.15).setRestitution(0));
-    }
-    return tile;
-  }
   start() {
     if (this.state !== 'ready') return;
     this.keys.clear();

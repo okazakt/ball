@@ -2,7 +2,6 @@ export const COLS = 8, ROWS = 11, FLOOR_THICKNESS = .24, GAP = 1 + FLOOR_THICKNE
 export const DIRECTIONS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 export const direction = c => DIRECTIONS[c.rotation ?? 0];
 export const cellCenter = (x, z) => ({ x: x - (COLS - 1) / 2, z: z - (ROWS - 1) / 2 });
-export const MARKER_EDGE = .46, MARKER_BUMP_RADIUS = .035;
 export const HOLE_RADIUS = .48;
 // Goals are outward-facing openings in the perimeter, one cell wide.
 export function goalEdge(c) {

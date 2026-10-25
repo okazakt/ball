@@ -12,18 +12,24 @@ const fs = require('node:fs');
   const {floor,defaultStage}=await import('./src/stage.js');const {cellCenter}=await import('./src/mechanics.js');
   const g=window.__toukan.game; const check=(ok,msg)=>{if(!ok)throw Error(msg)};
   for(const fi of [0,1])for(const size of ['S','M'])for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){
-   const stage={...defaultStage(),size,balls:[{x:1,z:1,floor:fi}],floors:[floor(),floor()]};stage.floors[fi].cells=[{type:'goal',x:4,z:5}];
-   g.load(stage,false);g.state='playing';const b=g.balls[0],q=cellCenter(4,5),y=-fi*1.24+b.radius;
-   check(g.floorGroups[fi].children.filter(m=>m.userData.surface==='start-bump').length===4,'Missing start ridges');
-   check(g.floorGroups[fi].children.filter(m=>m.userData.surface==='goal-bump').length===4,'Missing goal ridges');
-   b.body.setTranslation({x:q.x-dx*.5,y,z:q.z-dz*.5},true);b.body.setLinvel({x:0,y:0,z:0},true);g.step(1/60);check(!b.done,'Goal triggered on edge');
-   b.body.setTranslation({x:q.x,y:y+.2,z:q.z},true);b.body.setLinvel({x:0,y:0,z:0},true);g.step(1/60);check(!b.done,'Goal triggered above rim');
-   b.body.setTranslation({x:q.x-dx*1.1,y,z:q.z-dz*1.1},true);b.body.setLinvel({x:0,y:0,z:0},true);
-   const key=dx===1?'ArrowRight':dx===-1?'ArrowLeft':dz===1?'ArrowDown':'ArrowUp';g.keys.add(key);
-   let crossed=false;for(let i=0;i<180&&!b.done;i++){g.step(1/60);crossed ||= b.body.translation().y>y+.005;}
-   g.keys.clear();check(b.done,`Failed to cross rim and goal ${fi}/${size}/${dx},${dz}`);check(crossed,'No physical bump contact');
+   const goal = dx===1 ? {x:7,z:5,rotation:1} : dx===-1 ? {x:0,z:5,rotation:3} : dz===1 ? {x:4,z:10,rotation:0} : {x:4,z:0,rotation:2};
+   const stage={...defaultStage(),size,balls:[{x:3,z:4,floor:fi}],floors:[floor(),floor()]};
+   stage.floors[fi].cells=[{type:'goal',...goal}];
+   g.load(stage,false);g.state='playing';const b=g.balls[0],y=-fi*1.24+b.radius;
+   check(!g.floorGroups.some(f=>f.children.some(m=>['start','start-bump'].includes(m.userData.surface))),'Start marker remains');
+   const initial=cellCenter(3,4);
+   check(Math.abs(b.body.translation().x-initial.x)<.001&&Math.abs(b.body.translation().z-initial.z)<.001,'Initial ball position changed');
+   b.body.setLinvel({x:dx*2,y:0,z:dz*2},true);
+   for(let i=0;i<30;i++)g.step(1/60);
+   const moved=b.body.translation();
+   check((moved.x-initial.x)*dx+(moved.z-initial.z)*dz>.5,'Ball blocked by a start rim');
+   const q=cellCenter(goal.x,goal.z);
+   b.body.setTranslation({x:q.x,y:y+.01,z:q.z},true);b.body.setLinvel({x:dx*2,y:0,z:dz*2},true);
+   for(let i=0;i<90&&!b.done;i++)g.step(1/60);
+   check(b.done,'Side exit failed');
+
   }
-  g.load(defaultStage(),false);g.sync();document.querySelectorAll('dialog[open]').forEach(d=>d.close());return '16 approaches passed';
+  g.load(defaultStage(),false);g.sync();document.querySelectorAll('dialog[open]').forEach(d=>d.close());return '16 initial-position and side-exit approaches passed';
  });
  const ratios=[];
  for(const viewport of [{width:390,height:844},{width:591,height:1280},{width:844,height:390}]){
