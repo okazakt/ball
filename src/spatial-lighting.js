@@ -51,7 +51,7 @@ export function prepareSpatialMaterial(material) {
   material.customProgramCacheKey=()=> 'continuous-room-pbr-v1';
   return material;
 }
-export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22) {
+export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertureLimited=false) {
   const u=mesh.material.userData.spatialUniforms;if(!u)return;
   const upper=game.stage.floors[0].dark?0:exposure;
   const lower=game.stage.floors[1].dark?0:1-exposure;
@@ -67,7 +67,17 @@ export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22) {
   for(let i=0;i<COUNT;i++){
     const light=lights[i];if(!light){u.movingColors.value[i].setRGB(0,0,0);u.movingParams.value[i].set(0,2,-1,1);continue;}
     u.movingPositions.value[i].copy(light.userData.spatialPosition).applyMatrix4(game.camera.matrixWorldInverse);
-    u.movingColors.value[i].copy(light.color).multiplyScalar((light.userData.baseIntensity??light.intensity)*Math.PI);
+    // A spotlight is a point-source approximation of an opening. Limit its
+    // energy on the sheltered slab by the aperture's solid angle;
+    // otherwise the horizontal ABS surface reflects a white, unoccluded lamp.
+    let apertureTransmission=1;
+    if(apertureLimited && light.userData.aperture){
+      const {radius,y}=light.userData.aperture;
+      if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
+      const depth=Math.max(0,y-(mesh.position.y+mesh.geometry.boundingBox.max.y));
+      apertureTransmission=1-depth/Math.sqrt(depth*depth+radius*radius);
+    }
+    u.movingColors.value[i].copy(light.color).multiplyScalar((light.userData.baseIntensity??light.intensity)*Math.PI*apertureTransmission);
     if(light.isSpotLight){
       u.movingDirections.value[i].copy(light.userData.spatialTarget).sub(light.userData.spatialPosition).transformDirection(game.camera.matrixWorldInverse);
       u.movingParams.value[i].set(light.distance,light.decay,Math.cos(light.angle),Math.cos(light.angle*(1-light.penumbra)));

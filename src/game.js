@@ -269,6 +269,7 @@ export class Game {
     this.ripples = [];
     this.lastRipple = -1;
     this.floorGroups = [];
+    this.lowerFloorMeshes = [];
     this.lidReflections = [];
     this.activeFloor = 0;
     this.elapsed = 0;
@@ -317,6 +318,7 @@ export class Game {
         const floorMat = this.floorMaterials(fi);
         const floorMesh = this.mesh(fi === 0 ? laminateFloorGeometry(floorGeo) : floorGeo, floorMat, 0, y - FLOOR_THICKNESS, 0, fi);
         floorMesh.userData.surface = 'floor';
+        if (fi > 0) this.lowerFloorMeshes.push(floorMesh);
       }
       const perimeter = w => w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
       const wallRects = f.walls.filter(w => !perimeter(w)).map(w => {
@@ -408,6 +410,7 @@ export class Game {
           beam.layers.disableAll();
           for (let li = fi + 1; li <= bottom; li++) beam.layers.enable(li + 1);
           beam.userData.persistentLight = true;
+          beam.userData.aperture = { radius: HOLE_RADIUS, y: y - FLOOR_THICKNESS };
           beam.target.userData.persistentLight = true;
           this.board.add(beam, beam.target);
           const poolCanvas = document.createElement('canvas'); poolCanvas.width = poolCanvas.height = 128;
@@ -600,7 +603,8 @@ export class Game {
       clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
   }
   floorMaterials(fi, bottom = 0) {
-    const core = prepareFramePlastic(this.casePlastic(), this.frameSettings, FLOOR_THICKNESS, bottom);
+    const base = fi === 0 ? this.casePlastic() : prepareSpatialMaterial(this.casePlastic());
+    const core = prepareFramePlastic(base, this.frameSettings, FLOOR_THICKNESS, bottom);
     if (fi !== 0) return core;
     return [this.floorMaterial(fi), core];
   }
@@ -620,6 +624,7 @@ export class Game {
     const mesh = this.mesh(fi === 0 ? laminateFloorGeometry(geometry) : geometry,
       this.floorMaterials(fi,-FLOOR_THICKNESS),p.x,y,p.z,fi);
     mesh.userData.surface = 'hole-floor';
+    if (fi > 0) this.lowerFloorMeshes.push(mesh);
     this.world.createCollider(this.R.ColliderDesc.trimesh(positions.array,
       Uint32Array.from({length:positions.count},(_,i)=>i)).setTranslation(p.x,y,p.z).setFriction(.1).setRestitution(.1));
   }
@@ -652,6 +657,7 @@ export class Game {
     const p = cellPos(c.x,c.z);
     const light = new T.PointLight(0xc3e9ff,.85,2.6,1.5);
     light.position.set(p.x+dx*.5,.45,p.z+dz*.5); light.layers.set(2);
+    light.userData.aperture = { radius: .5, y: -FLOOR_THICKNESS };
     light.visible = !this.stage.floors[0].dark;
     this.board.add(light);
   }
@@ -1300,6 +1306,9 @@ export class Game {
       light.getWorldPosition(light.userData.spatialPosition);
       if(light.isSpotLight)light.target.getWorldPosition(light.userData.spatialTarget);
     }
+    // The lower slab shares the balls' sheltered light field and attenuated
+    // environment, rather than reflecting the full exterior studio at strength 2.
+    for(const mesh of this.lowerFloorMeshes)updateSpatialMaterial(this,mesh,0,.22,true);
     for(const b of this.balls)updateSpatialMaterial(this,b.mesh,exposureAt(b.mesh.position.y,b.radius));
     for(const door of this.doors){
       const top=door.mesh.position.y+.46;
