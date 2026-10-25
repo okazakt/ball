@@ -719,20 +719,26 @@ export class Game {
   createGoalExit(cell, y, fi) {
     this.goalSurfaces.push({cell,fi});
     const p = cellPos(cell.x,cell.z), [dx,dz] = direction(cell);
-    // Stripe the reveal on both jambs, the lintel and the threshold.
-    const red = new T.MeshStandardMaterial({color:0xef334b,roughness:.6});
-    const white = new T.MeshStandardMaterial({color:0xffffff,roughness:.6});
+    // Paint the two jambs and threshold. The opening has no lintel.
+    // Match the perimeter's shadow policy; paint cannot cast a separate shadow.
+    const red = new T.MeshBasicMaterial({color:0xff0000,toneMapped:false});
+    const white = new T.MeshBasicMaterial({color:0xffffff,toneMapped:false});
+    const stripe = (x,h,z,w,height,d,mat) => {
+      const mesh = this.box(x,h,z,w,height,d,mat,fi,false);
+      mesh.castShadow = mesh.receiveShadow = false;
+      mesh.userData.surface = 'goal-paint';
+      return mesh;
+    };
     for (let i=0;i<10;i++) {
       const mat = i%2 ? white : red, t = -.5+(i+.5)/10;
-      for (const side of [-1,1]) {
-        this.box(p.x+dx*.53-dz*side*.47,y+(i+.5)/10,p.z+dz*.53+dx*side*.47,
-          dx ? .16 : .06,.1,dx ? .06 : .16,mat,fi,false);
-      }
-      for (const h of [-.025,1.015])
-        this.box(p.x+dx*.53-dz*t,y+h,p.z+dz*.53+dx*t,
-          dx ? .16 : .1,.05,dx ? .1 : .16,mat,fi,false);
+      for (const side of [-1,1])
+        stripe(p.x+dx*.53-dz*side*.47,y+(i+.5)/10,p.z+dz*.53+dx*side*.47,
+          dx ? .16 : .06,.1,dx ? .06 : .16,mat);
+      stripe(p.x+dx*.53-dz*t,y-.025,p.z+dz*.53+dx*t,
+        dx ? .16 : .1,.05,dx ? .1 : .16,mat);
     }
   }
+
   markCell(cell, y, fi, color, kind) {
     const p = cellPos(cell.x, cell.z);
     const tile = this.mesh(new T.PlaneGeometry(1, 1),
