@@ -19,6 +19,7 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
     surfaceLowerSky:{value:new T.Color()},surfaceLowerGround:{value:new T.Color()},
     surfaceUpperEnabled:{value:1},surfaceEnvLevels:{value:new T.Vector2(.015,2)},
     movingApertures:{value:Array.from({length:COUNT},()=>new T.Vector2())},
+    surfaceOpeningCenters:{value:Array.from({length:COUNT},()=>new T.Vector2())},
     surfaceRampCount:{value:0},surfaceRamps:{value:Array.from({length:RAMP_COUNT},()=>new T.Vector4())},
   });
   material.userData.surfaceField=surfaceField;
@@ -32,7 +33,7 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
       shader.fragmentShader=`varying vec3 vSurfaceWorld;
         uniform vec3 surfaceLowerSky, surfaceLowerGround;
         uniform float surfaceUpperEnabled; uniform vec2 surfaceEnvLevels;
-        uniform vec2 movingApertures[${COUNT}];
+        uniform vec2 movingApertures[${COUNT}], surfaceOpeningCenters[${COUNT}];
         uniform int surfaceRampCount; uniform vec4 surfaceRamps[${RAMP_COUNT}];\n`+shader.fragmentShader;
     }
     shader.fragmentShader=`uniform vec3 movingSun; uniform vec3 movingSunDirection;
@@ -40,14 +41,25 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
       uniform vec3 movingPositions[${COUNT}]; uniform vec3 movingColors[${COUNT}];
       uniform vec3 movingDirections[${COUNT}]; uniform vec4 movingParams[${COUNT}];\n`+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_begin>',`
-      ${surfaceField ? `float surfaceExposure=smoothstep(${-GAP},0.0,vSurfaceWorld.y);
+      ${surfaceField ? `float heightExposure=smoothstep(${-GAP},0.0,vSurfaceWorld.y);
+        float surfaceExposure=heightExposure;
         // The open ramp keeps its exterior light down to the landing. Extend
         // that light onto the floor, then fade by distance into the chamber.
         for(int r=0;r<${RAMP_COUNT};r++){
           if(r>=surfaceRampCount)break;
           vec2 outside=max(abs(vSurfaceWorld.xz-surfaceRamps[r].xy)-surfaceRamps[r].zw,vec2(0.0));
-          float landingLight=1.0-smoothstep(.15,2.25,length(outside));
+          float landingLight=(1.0-smoothstep(.15,2.25,length(outside)))*mix(.18,1.0,heightExposure);
           surfaceExposure=max(surfaceExposure,landingLight);
+        }
+        // Soft bounced light near openings raises crushed lower-floor shadows
+        // without restoring the exterior brightness of the landing.
+        for(int j=0;j<${COUNT};j++){
+          if(movingApertures[j].x>0.0){
+            float depth=max(0.0,movingApertures[j].y-vSurfaceWorld.y);
+            float distanceFromOpening=length(vSurfaceWorld.xz-surfaceOpeningCenters[j]);
+            float openingFill=.035*(1.0-smoothstep(movingApertures[j].x,movingApertures[j].x+max(depth,.05),distanceFromOpening));
+            surfaceExposure=max(surfaceExposure,openingFill);
+          }
         }` : ''}
       GeometricContext geometry;
       geometry.position=-vViewPosition; geometry.normal=normal;
@@ -88,7 +100,7 @@ export function prepareSpatialMaterial(material, { surfaceField = false } = {}) 
       #endif
       `);
   };
-  material.customProgramCacheKey=()=> surfaceField ? 'continuous-abs-surface-v2' : 'continuous-room-pbr-v1';
+  material.customProgramCacheKey=()=> surfaceField ? 'continuous-abs-surface-v3' : 'continuous-room-pbr-v1';
   return material;
 }
 export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertureLimited=false) {
@@ -128,6 +140,7 @@ export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertur
     if(surfaceField && light.userData.aperture){
       const {radius,y}=light.userData.aperture;
       u.movingApertures.value[i].set(radius,y);
+      u.surfaceOpeningCenters.value[i].set(light.userData.spatialPosition.x,light.userData.spatialPosition.z);
     }
     if(!surfaceField && apertureLimited && light.userData.aperture){
       const {radius,y}=light.userData.aperture;

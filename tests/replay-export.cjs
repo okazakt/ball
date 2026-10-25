@@ -15,7 +15,7 @@ const assert=require('node:assert/strict');
   g.start();check(captureCalls===0&&!g.recorder,'Normal play started recording');
   g.makeNoise({x:0,y:.4,z:0},0,1);g.updateLowerRipples(.5);check(g.ripples.length===0,'Upper ball made a ripple');
   const b=g.balls[0];b.body.setTranslation({x:0,y:-1.24+b.radius,z:0},true);b.floor=1;g.sync();g.setLighting();g.updateLowerRipples(.5);
-  check(g.ripples.length===0,'Lower ball still emits position rings');
+  check(g.ripples.length===1,'Lower ball position ring missing');
   check(!b.light&&!b.mesh.children.some(m=>m.isLight),'Ball still has a following light');
   check(b.mesh.material.visible&&b.mesh.visible,'Lower ball must be drawn and naturally occluded by the floor');
   check(!g.ambient.layers.isEnabled(2)&&!g.sun.layers.isEnabled(2)&&g.lowerAmbient.intensity<.05,'Sunlight reaches the closed lower chamber');

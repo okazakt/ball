@@ -16,7 +16,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  for(const z of [1,3]){b.body.setTranslation({x:.5,y:-.84,z},true);b.floor=1;g.sync();g.renderScene();shots.push(sample())}
  const ballGlowDelta=Math.max(...shots[0].map((v,i)=>Math.abs(v-shots[1][i])));
  if(ballGlowDelta>1)throw Error('Invisible ball changes floor light: '+ballGlowDelta);
- g.state='playing';g.updateLowerRipples(1);if(g.ripples.length)throw Error('Position rings remain');g.state='ready';
+ g.state='playing';g.updateLowerRipples(1);if(g.ripples.length!==1)throw Error('Lower position ring missing');const ring=g.ripples[0].mesh;if(ring.material.depthTest||!ring.layers.isEnabled(1)||ring.children.some(m=>m.isLight))throw Error('Position ring must be an unlit overlay');g.clearRipples();g.state='ready';
  // Render the same tangent plane using each surface's material and local
  // coordinates. Equal pixels at the toe rule out a material/lighting seam.
  const comparison=[];
@@ -34,9 +34,22 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  for(const c of rampCells)c.type='disabled-ramp-field';
  g.renderScene();const previousDark=luma(sample(toe));
  for(const c of rampCells)c.type='ramp';
- if(landingBright<previousDark+50)throw Error('Ramp toe still dark: '+JSON.stringify({landingBright,previousDark}));
+ if(landingBright<previousDark+15)throw Error('Ramp toe still dark: '+JSON.stringify({landingBright,previousDark}));
+ g.renderScene();const rampNow=luma(sample(toe)),holeNow=luma(sample());
+ const materials=[...new Set(g.lowerFloorMeshes.map(m=>m.material))];
+ const backups=materials.map(m=>[m,m.onBeforeCompile,m.customProgramCacheKey]);
+ for(const [m,compile,key] of backups){
+ m.onBeforeCompile=shader=>{compile(shader);shader.fragmentShader=shader.fragmentShader.replace('mix(.18,1.0,heightExposure)','mix(1.0,1.0,heightExposure)').replace('float openingFill=.035','float openingFill=0.0')};
+ m.customProgramCacheKey=()=>key()+'-v227-comparison';m.needsUpdate=true;
+ }
+ g.renderScene();const rampBefore=luma(sample(toe)),holeBefore=luma(sample());
+ for(const [m,compile,key] of backups){m.onBeforeCompile=compile;m.customProgramCacheKey=key;m.needsUpdate=true}
+ g.renderScene();
+ if(rampNow>rampBefore-10||holeNow<holeBefore+3)throw Error('Opening balance failed: '+JSON.stringify({rampNow,rampBefore,holeNow,holeBefore}));
  document.querySelector('#start-panel').hidden=true;g.renderScene();
- return {ballGlowDelta,materialSeamDelta,followingLights:0,rings:g.ripples.length,landingBright,previousDark};
+ return {ballGlowDelta,materialSeamDelta,followingLights:0,restoredRingCount:1,landingBright,previousDark,rampNow,rampBefore,holeNow,holeBefore};
  }));
- assert.deepEqual(errors,[]);await page.screenshot({path:'/workspace/ball-captures/2.2.7-ramp.png'});
+ assert.deepEqual(errors,[]);await page.screenshot({path:'/workspace/ball-captures/2.2.8-ramp.png'});
+ await page.evaluate(()=>{const g=window.__toukan.game;g.state='playing';g.updateLowerRipples(1);g.state='ready';g.renderScene()});
+ await page.screenshot({path:'/workspace/ball-captures/2.2.8-ripple.png'});
  }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

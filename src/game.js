@@ -36,6 +36,8 @@ export class Game {
     this.frameSettings = { ...FRAME_DEFAULTS };
     this.wallMaterials = new Set();
     this.wallColliders = [];
+    this.rippleGeometry=new T.RingGeometry(.12,.145,32);
+    this.rippleMaterial=new T.MeshBasicMaterial({color:0xffc17c,transparent:true,opacity:.7,depthTest:false,depthWrite:false,side:T.DoubleSide});
     this.setupInput();
   }
   updateFrameSettings(patch) {
@@ -567,7 +569,10 @@ export class Game {
     this.events.loaded?.();
   }
   warmupRenderVariants() {
-    // Precompile both render layers without artificial ball lights or rings.
+    // Precompile both layers and the position ring; no following point light.
+    const ring=this.mesh(this.rippleGeometry,this.rippleMaterial,0,.025,0,0);
+    ring.rotation.x=-Math.PI/2;
+    try { this.renderScene(); } finally { ring.parent.remove(ring); }
     this.renderScene();
     this.prewarmedPrograms=this.renderer.info.programs.length;
   }
@@ -1333,7 +1338,19 @@ export class Game {
     }
   }
   updateLowerRipples(dt) {
-    // Position rings are intentionally disabled along with ball glow.
+    for (const b of this.balls) {
+      if (!['playing','replay'].includes(this.state) || (b.displayFloor ?? b.floor) !== 1 || (b.displayDone ?? b.done)) {
+        b.rippleClock = 0; continue;
+      }
+      b.rippleClock = (b.rippleClock ?? 0) - dt;
+      if (b.rippleClock > 0) continue;
+      b.rippleClock = .4;
+      const mesh = this.mesh(this.rippleGeometry,this.rippleMaterial.clone(),
+        b.mesh.position.x,.025,b.mesh.position.z,0);
+      mesh.rotation.x = -Math.PI/2; mesh.renderOrder = 1000;
+      mesh.userData.surface = 'lower-ball-ripple';
+      this.ripples.push({mesh,age:0});
+    }
   }
   clearRipples() {
     for (const r of this.ripples) {
