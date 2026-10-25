@@ -333,23 +333,40 @@ export class Game {
         walls.castShadow = false;
         walls.userData.surface = 'walls';
       }
-      const frameRects = wallsForFloor.filter(perimeter).map(w => {
-        let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
-        if (w.axis === 'h') {
-          z += w.z === 0 ? -2.5 : 2.5;
-          return [x - 7.5, z - 5, x + 107.5, z + 5];
-        }
-        x += w.x === 0 ? -2.5 : 2.5;
-        return [x - 5, z - 7.5, x + 5, z + 107.5];
-      });
-      if (frameRects.length) {
-        const height = fi === 0 ? LID_Y + FLOOR_THICKNESS : GAP + FLOOR_THICKNESS;
+      const frameWalls = wallsForFloor.filter(perimeter);
+      const otherFloor = stage.floors[1-fi];
+      const otherExits = otherFloor.cells.filter(c => c.type === 'goal').map(goalEdge);
+      const otherWalls = otherFloor.walls.filter(w => perimeter(w) && !otherExits.some(e =>
+        e && e.axis === w.axis && e.x === w.x && e.z === w.z));
+      const shared = w => otherWalls.some(o => o.axis === w.axis && o.x === w.x && o.z === w.z);
+      // Shared perimeter walls are one full-height shell. Two beveled, separately
+      // lit floor pieces expose a false triangular join beside a descending ramp.
+      const sections = fi === 0
+        ? [{walls:frameWalls.filter(shared), bottom:-GAP-FLOOR_THICKNESS, height:LID_Y+GAP+2*FLOOR_THICKNESS, continuous:true},
+           {walls:frameWalls.filter(w => !shared(w)), bottom:0, height:LID_Y+FLOOR_THICKNESS}]
+        : [{walls:frameWalls.filter(w => !shared(w)), bottom:y-FLOOR_THICKNESS, height:GAP+FLOOR_THICKNESS}];
+      for (const section of sections) {
+        const frameRects = section.walls.map(w => {
+          let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
+          if (w.axis === 'h') {
+            z += w.z === 0 ? -2.5 : 2.5;
+            return [x - 7.5, z - 5, x + 107.5, z + 5];
+          }
+          x += w.x === 0 ? -2.5 : 2.5;
+          return [x - 5, z - 7.5, x + 5, z + 107.5];
+        });
+        if (!frameRects.length) continue;
+        const {height,bottom} = section;
         const factory = () => frameGeometry(frameRects, height, this.frameSettings);
         const frame = this.mesh(factory(), prepareFramePlastic(this.casePlastic(), this.frameSettings, height),
-          0, fi === 0 ? y : y-FLOOR_THICKNESS, 0, fi);
+          0, bottom, 0, fi);
         frame.userData.frameGeometryFactory = factory;
         frame.userData.surface = 'frame';
-        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(frame, goal, 'frame', fi);
+        frame.userData.continuousShell = !!section.continuous;
+        const paintFloors = section.continuous ? [0,1] : [fi];
+        for (const paintFloor of paintFloors)
+          for (const goal of stage.floors[paintFloor].cells.filter(c => c.type === 'goal'))
+            this.paintGoalReveal(frame, goal, 'frame', paintFloor);
         if (fi > 0) for (const goal of stage.floors[fi-1].cells.filter(c => c.type === 'goal'))
           this.paintGoalReveal(frame, goal, 'threshold', fi-1);
         frame.castShadow = false;

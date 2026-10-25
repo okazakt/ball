@@ -18,6 +18,17 @@ const fs = require('node:fs');
       const g=window.__toukan.game, original=structuredClone(g.stage), settings={...g.wallSettings};
       const check=(condition,message)=>{if(!condition)throw Error(message)};
       g.warmupRenderVariants=()=>{};
+      const shell=g.floorGroups[0].children.find(m=>m.userData.continuousShell);
+      check(shell,'Shared perimeter must be one upper/lower shell');
+      shell.geometry.computeBoundingBox();
+      check(Math.abs(shell.position.y+shell.geometry.boundingBox.min.y+GAP+.24)<1e-5,
+        'Shared shell must extend below the lower floor');
+      check(Math.abs(shell.position.y+shell.geometry.boundingBox.max.y-1.31)<1e-5,
+        'Shared shell must retain its upper rim height');
+      const shellP=shell.geometry.attributes.position;
+      for(let i=0;i<shellP.count;i++)
+        check(Math.abs(shellP.getY(i)+shell.position.y)>1e-5,
+          'Shared shell must have no bevel or cap at the upper/lower join');
       // Every ramp quad is one plane, including the full upper/lower side.
       for (const rotation of [0,1,2,3]) {
         const rampStage=structuredClone(original);
