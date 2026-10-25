@@ -317,7 +317,7 @@ export class Game {
         const floorMat = this.floorMaterials(fi);
         const floorMesh = this.mesh(fi === 0 ? laminateFloorGeometry(floorGeo) : floorGeo, floorMat, 0, y - FLOOR_THICKNESS, 0, fi);
         floorMesh.userData.surface = 'floor';
-        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(floorMesh, goal, 'floor');
+        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(floorMesh, goal, 'floor', fi);
       }
       const perimeter = w => w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
       const exits = f.cells.filter(c => c.type === 'goal').map(goalEdge);
@@ -349,7 +349,7 @@ export class Game {
           0, fi === 0 ? y : y-FLOOR_THICKNESS, 0, fi);
         frame.userData.frameGeometryFactory = factory;
         frame.userData.surface = 'frame';
-        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(frame, goal, 'frame');
+        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(frame, goal, 'frame', fi);
         frame.castShadow = false;
       }
       for (const w of wallsForFloor) {
@@ -716,19 +716,21 @@ export class Game {
     }
     return true;
   }
-  paintGoalReveal(mesh, cell, kind) {
+  paintGoalReveal(mesh, cell, kind, fi) {
     const p = cellPos(cell.x, cell.z), [dx,dz] = direction(cell);
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       const previous = material.onBeforeCompile.bind(material);
       const previousKey = material.customProgramCacheKey.bind(material);
       material.onBeforeCompile = shader => {
         previous(shader);
+        shader.uniforms.goalPaintFloorY = {value:-fi*GAP-mesh.position.y};
+        shader.uniforms.goalPaintTopY = {value:fi === 0 ? LID_Y+FLOOR_THICKNESS : GAP};
         shader.uniforms.goalPaintCenter = {value:new T.Vector2(p.x,p.z)};
         shader.uniforms.goalPaintDirection = {value:new T.Vector2(dx,dz)};
         shader.vertexShader = 'varying vec3 vGoalPaintPosition;\n'+shader.vertexShader;
         shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
           '#include <begin_vertex>\nvGoalPaintPosition = position;');
-        shader.fragmentShader = 'varying vec3 vGoalPaintPosition; uniform vec2 goalPaintCenter; uniform vec2 goalPaintDirection;\n'+shader.fragmentShader;
+        shader.fragmentShader = 'varying vec3 vGoalPaintPosition; uniform float goalPaintFloorY; uniform float goalPaintTopY; uniform vec2 goalPaintCenter; uniform vec2 goalPaintDirection;\n'+shader.fragmentShader;
         // Paint the original rounded surface itself, including its bevels and
         // full depth. Apply after display conversion to retain pure red/white.
         shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', `
@@ -739,18 +741,49 @@ export class Game {
           bool goalReveal = goalAlong > .35 && goalAlong < .70 &&
             ${kind === 'frame' ? 'abs(goalAcross) > .34 && abs(goalAcross) < .66' : 'abs(goalAcross) < .50'};
           if (goalReveal) {
-            float goalStripe = ${kind === 'frame' ? 'vGoalPaintPosition.y' : '(goalAcross+.5)'} * 10.;
+            float goalHeight = vGoalPaintPosition.y-goalPaintFloorY;
+            float goalPath = ${kind === 'frame' ? 'sign(goalAcross)*(.30+.125*1.57079632679+max(0.,goalHeight-.125))' : 'goalAcross'};
+            float goalStripe = (goalPath+.3)*10.;
             gl_FragColor = vec4(mod(floor(goalStripe),2.) < 1. ? vec3(1.,0.,0.) : vec3(1.),1.);
+            ${kind === 'frame' ? 'if (goalHeight > goalPaintTopY-.06) gl_FragColor = vec4(1.,0.,0.,1.);' : ''}
           }
         `);
       };
-      material.customProgramCacheKey = () => previousKey()+'-goal-reveal-'+kind;
+      material.customProgramCacheKey = () => previousKey()+'-goal-reveal-curved-v2-'+kind;
       material.needsUpdate = true;
       material.userData.goalPaint = kind;
     }
   }
   createGoalExit(cell, y, fi) {
     this.goalSurfaces.push({cell,fi});
+    const p=cellPos(cell.x,cell.z), [dx,dz]=direction(cell), radius=.125;
+    // Quarter-circle coves join the threshold to each jamb. One arc-length
+    // coordinate carries the stripes continuously from floor to curve to wall.
+    for (const side of [-1,1]) {
+      const positions=[], paths=[], indices=[], steps=32;
+      for(let i=0;i<=steps;i++) {
+        const angle=i/steps*Math.PI/2;
+        const across=side*(.30+radius*Math.sin(angle));
+        const height=radius*(1-Math.cos(angle));
+        for(const along of [.35,.60]) {
+          positions.push(p.x+dx*along-dz*across,y+height+.001,p.z+dz*along+dx*across);
+          paths.push(side*(.30+radius*angle));
+        }
+        if(i<steps) {const k=i*2;indices.push(k,k+1,k+2,k+1,k+3,k+2);}
+      }
+      const geometry=new T.BufferGeometry();
+      geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+      geometry.setAttribute('goalPath',new T.Float32BufferAttribute(paths,1));
+      geometry.setIndex(indices);geometry.computeVertexNormals();
+      const material=new T.ShaderMaterial({
+        side:T.DoubleSide,toneMapped:false,
+        vertexShader:'attribute float goalPath; varying float vGoalPath; void main(){vGoalPath=goalPath;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+        fragmentShader:'varying float vGoalPath; void main(){float s=mod(floor((vGoalPath+.3)*10.),2.);gl_FragColor=vec4(s<1.?vec3(1.,0.,0.):vec3(1.),1.);}'
+      });
+      const cove=this.mesh(geometry,material,0,0,0,fi);
+      cove.castShadow=cove.receiveShadow=false;
+      cove.userData.surface='goal-curve';
+    }
   }
 
   start() {
