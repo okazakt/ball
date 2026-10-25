@@ -1,4 +1,4 @@
-const CACHE = 'toukan-2.5.0+0ab7e75f483f';
+const CACHE = 'toukan-2.5.1+31956508c18a';
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   './src/version.js',
   './src/game.js',
   './src/floor-laminate.js',
+  './src/translucent-floor.js',
   './src/frame-plastic.js',
   './src/spatial-lighting.js',
   './src/wall-settings.js',

@@ -1,3 +1,4 @@
+import { FLOOR_WINDOW_OPACITY, FLOOR_WINDOW_SIDE_OPACITY, windowDaylight } from './translucent-floor.js';
 import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
@@ -311,10 +312,8 @@ export class Game {
           .setTranslation((x0+x1)/2, y-FLOOR_THICKNESS/2, (z0+z1)/2).setFriction(0.1).setRestitution(0.1));
       const windows = new Set((f.windows ?? []).map(p => `${p.x}:${p.z}`));
       const opaqueRects = floorRects.filter(([x,z]) => !windows.has(`${Math.floor(x+COLS/2)}:${Math.floor(z+ROWS/2)}`));
-      for (const [x0,z0,x1,z1] of floorRects.filter(r => !opaqueRects.includes(r))) {
-        const mat = new T.MeshStandardMaterial({color:0xb4e6df,transparent:true,opacity:.22,depthWrite:false,roughness:.25});
-        this.mesh(new T.BoxGeometry(x1-x0,FLOOR_THICKNESS,z1-z0),mat,(x0+x1)/2,y-FLOOR_THICKNESS/2,(z0+z1)/2,fi);
-      }
+      for (const rect of floorRects.filter(r => !opaqueRects.includes(r)))
+        this.createTranslucentFloor(rect, y, fi);
       if (opaqueRects.length) {
         const floorGeo = solidGeometry(opaqueRects.map(rect => rect.map(v => v * 100)), FLOOR_THICKNESS);
         const positions = floorGeo.attributes.position, uvs = floorGeo.attributes.uv;
@@ -625,6 +624,32 @@ export class Game {
   casePlastic() {
     return new T.MeshPhysicalMaterial({ color: 0x269c67, roughness: .1, metalness: 0,
       clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
+  }
+  createTranslucentFloor([x0,z0,x1,z1], y, fi) {
+    const x=(x0+x1)/2,z=(z0+z1)/2;
+    const geometry=new T.BoxGeometry(x1-x0,FLOOR_THICKNESS,z1-z0);
+    const positions=geometry.attributes.position,uv=geometry.attributes.uv;
+    for(let i=0;i<positions.count;i++)
+      uv.setXY(i,(positions.getX(i)+x)/COLS+.5,.5-(positions.getZ(i)+z)/ROWS);
+    const print=this.floorMaterial(fi);
+    print.transparent=true; print.opacity=FLOOR_WINDOW_OPACITY; print.depthWrite=false;
+    const side=new T.MeshStandardMaterial({color:0xd5e4df,transparent:true,
+      opacity:FLOOR_WINDOW_SIDE_OPACITY,depthWrite:false,roughness:.95,metalness:0});
+    // Print only the top. A second printed underside would double its opacity.
+    const underside=new T.MeshBasicMaterial({visible:false});
+    const mesh=this.mesh(geometry,[side,side,print,underside,side,side],x,y-FLOOR_THICKNESS/2,z,fi);
+    mesh.userData.surface='translucent-floor'; mesh.userData.transmission=windowDaylight().transmission;
+    const daylight=windowDaylight();
+    const beam=new T.SpotLight(0xbceeff,daylight.intensity,GAP+2,
+      daylight.angle,daylight.penumbra,daylight.decay);
+    beam.position.set(x,y+.35,z); beam.target.position.set(x,y-GAP,z);
+    beam.layers.set(2);
+    beam.visible=!this.stage.floors[0].dark;
+    beam.userData.persistentLight=true; beam.target.userData.persistentLight=true;
+    beam.userData.surface='transmitted-daylight';
+    beam.userData.transmission=daylight.transmission;
+    beam.userData.baseIntensity=daylight.intensity;
+    this.board.add(beam,beam.target);
   }
   floorMaterials(fi, bottom = 0) {
     const paper = this.floorMaterial(fi);
