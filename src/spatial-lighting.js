@@ -5,7 +5,7 @@ export function exposureAt(y, radius=.4) {
   const t=Math.max(0,Math.min(1,(y+.24+radius)/(.39+2*radius)));
   return t*t*(3-2*t);
 }
-export function prepareSpatialMaterial(material) {
+export function prepareSpatialMaterial(material, { surfaceField = false } = {}) {
   const uniforms={
     movingSun:{value:new T.Color()},movingSunDirection:{value:new T.Vector3()},
     movingSky:{value:new T.Color()},movingGround:{value:new T.Color()},
@@ -14,14 +14,30 @@ export function prepareSpatialMaterial(material) {
     movingDirections:{value:Array.from({length:COUNT},()=>new T.Vector3())},
     movingParams:{value:Array.from({length:COUNT},()=>new T.Vector4())},
   };
+  if(surfaceField)Object.assign(uniforms,{
+    surfaceLowerSky:{value:new T.Color()},surfaceLowerGround:{value:new T.Color()},
+    surfaceUpperEnabled:{value:1},surfaceEnvLevels:{value:new T.Vector2(.015,2)},
+    movingApertures:{value:Array.from({length:COUNT},()=>new T.Vector2())},
+  });
+  material.userData.surfaceField=surfaceField;
   material.userData.spatialUniforms=uniforms;
   material.onBeforeCompile=shader=>{
     Object.assign(shader.uniforms,uniforms);
+    if(surfaceField){
+      shader.vertexShader='varying vec3 vSurfaceWorld;\n'+shader.vertexShader;
+      shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvSurfaceWorld=(modelMatrix*vec4(position,1.0)).xyz;');
+      shader.fragmentShader=`varying vec3 vSurfaceWorld;
+        uniform vec3 surfaceLowerSky, surfaceLowerGround;
+        uniform float surfaceUpperEnabled; uniform vec2 surfaceEnvLevels;
+        uniform vec2 movingApertures[${COUNT}];\n`+shader.fragmentShader;
+    }
     shader.fragmentShader=`uniform vec3 movingSun; uniform vec3 movingSunDirection;
       uniform vec3 movingSky; uniform vec3 movingGround;
       uniform vec3 movingPositions[${COUNT}]; uniform vec3 movingColors[${COUNT}];
       uniform vec3 movingDirections[${COUNT}]; uniform vec4 movingParams[${COUNT}];\n`+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_begin>',`
+      ${surfaceField ? 'float surfaceExposure=smoothstep(-1.24,0.0,vSurfaceWorld.y);' : ''}
       GeometricContext geometry;
       geometry.position=-vViewPosition; geometry.normal=normal;
       geometry.viewDir=(isOrthographic)?vec3(0.,0.,1.):normalize(vViewPosition);
@@ -29,7 +45,7 @@ export function prepareSpatialMaterial(material) {
         geometry.clearcoatNormal=clearcoatNormal;
       #endif
       IncidentLight directLight;
-      directLight.direction=movingSunDirection; directLight.color=movingSun; directLight.visible=true;
+      directLight.direction=movingSunDirection; directLight.color=movingSun${surfaceField ? "*surfaceExposure" : ""}; directLight.visible=true;
       RE_Direct(directLight,geometry,material,reflectedLight);
       for(int j=0;j<${COUNT};j++){
         vec3 delta=movingPositions[j]-geometry.position;
@@ -40,19 +56,39 @@ export function prepareSpatialMaterial(material) {
           float cone=dot(-directLight.direction,movingDirections[j]);
           directLight.color*=smoothstep(movingParams[j].z,movingParams[j].w,cone);
         }
+        ${surfaceField ? `if(movingApertures[j].x>0.0){
+          float depth=max(0.0,movingApertures[j].y-vSurfaceWorld.y);
+          directLight.color*=1.0-depth/sqrt(depth*depth+movingApertures[j].x*movingApertures[j].x);
+        }` : ''}
         RE_Direct(directLight,geometry,material,reflectedLight);
       }
       vec3 worldNormal=inverseTransformDirection(geometry.normal,viewMatrix);
-      vec3 irradiance=PI*mix(movingGround,movingSky,worldNormal.y*.5+.5);
+      vec3 irradiance=PI*mix(
+        ${surfaceField ? 'mix(surfaceLowerGround,movingGround,surfaceExposure),mix(surfaceLowerSky,movingSky,surfaceExposure)' : 'movingGround,movingSky'},worldNormal.y*.5+.5);
       vec3 iblIrradiance=vec3(0.);
       vec3 radiance=vec3(0.); vec3 clearcoatRadiance=vec3(0.);
     `);
+    if(surfaceField)shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_maps>',
+      '#include <lights_fragment_maps>\n'+`
+      #ifdef USE_ENVMAP
+        float surfaceEnvironment=mix(surfaceEnvLevels.x,surfaceEnvLevels.y,surfaceExposure*surfaceUpperEnabled)/2.0;
+        iblIrradiance*=surfaceEnvironment;
+        radiance*=surfaceEnvironment;clearcoatRadiance*=surfaceEnvironment;
+      #endif
+      `);
   };
-  material.customProgramCacheKey=()=> 'continuous-room-pbr-v1';
+  material.customProgramCacheKey=()=> surfaceField ? 'continuous-abs-surface-v1' : 'continuous-room-pbr-v1';
   return material;
 }
 export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertureLimited=false) {
   const u=mesh.material.userData.spatialUniforms;if(!u)return;
+  const surfaceField=mesh.material.userData.surfaceField;
+  if(surfaceField){
+    exposure=1;
+    u.surfaceUpperEnabled.value=game.stage.floors[0].dark?0:1;
+    u.surfaceLowerSky.value.copy(game.lowerAmbient.color).multiplyScalar(game.lowerAmbient.intensity*(game.stage.floors[1].dark?0:1));
+    u.surfaceLowerGround.value.copy(game.lowerAmbient.groundColor).multiplyScalar(game.lowerAmbient.intensity*(game.stage.floors[1].dark?0:1));
+  }
   const upper=game.stage.floors[0].dark?0:exposure;
   const lower=game.stage.floors[1].dark?0:1-exposure;
   u.movingSun.value.copy(game.sun.color).multiplyScalar(game.sun.intensity*Math.PI*upper);
@@ -61,17 +97,22 @@ export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22,apertur
     .add(tint.copy(game.lowerAmbient.color).multiplyScalar(game.lowerAmbient.intensity*lower));
   u.movingGround.value.copy(game.ambient.groundColor).multiplyScalar(game.ambient.intensity*upper)
     .add(tint.copy(game.lowerAmbient.groundColor).multiplyScalar(game.lowerAmbient.intensity*lower));
-  mesh.material.envMapIntensity=.015+(envStrength-.015)*upper;
+  mesh.material.envMapIntensity=surfaceField?2:.015+(envStrength-.015)*upper;
   const lights=game.movingLights.filter(light=>light.visible && (light.userData.baseIntensity??light.intensity)>0)
     .sort((a,b)=>a.userData.spatialPosition.distanceToSquared(mesh.position)-b.userData.spatialPosition.distanceToSquared(mesh.position));
   for(let i=0;i<COUNT;i++){
+    if(surfaceField)u.movingApertures.value[i].set(0,0);
     const light=lights[i];if(!light){u.movingColors.value[i].setRGB(0,0,0);u.movingParams.value[i].set(0,2,-1,1);continue;}
     u.movingPositions.value[i].copy(light.userData.spatialPosition).applyMatrix4(game.camera.matrixWorldInverse);
     // A spotlight is a point-source approximation of an opening. Limit its
     // energy on the sheltered slab by the aperture's solid angle;
     // otherwise the horizontal ABS surface reflects a white, unoccluded lamp.
     let apertureTransmission=1;
-    if(apertureLimited && light.userData.aperture){
+    if(surfaceField && light.userData.aperture){
+      const {radius,y}=light.userData.aperture;
+      u.movingApertures.value[i].set(radius,y);
+    }
+    if(!surfaceField && apertureLimited && light.userData.aperture){
       const {radius,y}=light.userData.aperture;
       if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
       const depth=Math.max(0,y-(mesh.position.y+mesh.geometry.boundingBox.max.y));

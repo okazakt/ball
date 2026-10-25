@@ -66,7 +66,7 @@ const game = new Game($('#viewport'), sound, {
     $('#start-panel').hidden = true;
     closeDialogs();
     $('#replay-label').hidden = false;
-    $('#status').textContent = 'リプレイ再生中 · 下段の玉の位置は波紋で表示';
+    $('#status').textContent = 'リプレイ再生中';
   },
   replayEnd(r) {
     $('#replay-label').hidden = true;

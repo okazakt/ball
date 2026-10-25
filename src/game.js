@@ -36,8 +36,6 @@ export class Game {
     this.frameSettings = { ...FRAME_DEFAULTS };
     this.wallMaterials = new Set();
     this.wallColliders = [];
-    this.rippleGeometry=new T.RingGeometry(.12,.145,32);
-    this.rippleMaterial=new T.MeshBasicMaterial({color:0xffc17c,transparent:true,opacity:.7,depthTest:false,depthWrite:false,side:T.DoubleSide});
     this.setupInput();
   }
   updateFrameSettings(patch) {
@@ -548,14 +546,10 @@ export class Game {
         pos.z,
         fi
       );
-      const light = new T.PointLight(['#ffbb77', '#b4f6c7', '#fff2b6'][i], 1.3, 2.2, 1.4);
-      light.layers.set(1);light.layers.enable(2);light.userData.baseIntensity=1.3;
-      mesh.add(light);
       this.balls.push({
         body,
         collider,
         mesh,
-        light,
         radius,
         floor: fi,
         done: false,
@@ -573,29 +567,8 @@ export class Game {
     this.events.loaded?.();
   }
   warmupRenderVariants() {
-    // Moving a point light to the other floor changes Three.js shader variants.
-    // Draw every distribution, including the first lower ripple, before play.
-    const state=this.state, saved=this.balls.map(b=>({floor:b.displayFloor,done:b.displayDone,
-      meshMask:b.mesh.layers.mask,lightMask:b.light.layers.mask}));
-    this.state='playing';
-    const ripple=this.mesh(this.rippleGeometry,this.rippleMaterial,0,.025,0,0);
-    ripple.rotation.x=-Math.PI/2;
-    try {
-      for(let lower=0;lower<=this.balls.length;lower++) {
-        this.balls.forEach((b,i)=>{
-          const fi=i<lower?1:0;b.displayFloor=fi;b.displayDone=false;
-          b.mesh.layers.set(fi+1);b.light.layers.set(fi+1);
-        });
-        this.updateLowerRipples(1);
-        this.renderScene();
-      }
-    } finally {
-      ripple.parent.remove(ripple);
-      this.clearRipples();this.state=state;
-      this.balls.forEach((b,i)=>{b.displayFloor=saved[i].floor;b.displayDone=saved[i].done;
-        b.mesh.layers.mask=saved[i].meshMask;b.light.layers.mask=saved[i].lightMask;});
-      this.renderScene();
-    }
+    // Precompile both render layers without artificial ball lights or rings.
+    this.renderScene();
     this.prewarmedPrograms=this.renderer.info.programs.length;
   }
   casePlastic() {
@@ -603,7 +576,7 @@ export class Game {
       clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
   }
   floorMaterials(fi, bottom = 0) {
-    const base = fi === 0 ? this.casePlastic() : prepareSpatialMaterial(this.casePlastic());
+    const base = fi === 0 ? this.casePlastic() : prepareSpatialMaterial(this.casePlastic(),{surfaceField:true});
     const core = prepareFramePlastic(base, this.frameSettings, FLOOR_THICKNESS, bottom);
     if (fi !== 0) return core;
     return [this.floorMaterial(fi), core];
@@ -646,13 +619,17 @@ export class Game {
       if (b.clone().sub(a).cross(d.clone().sub(a)).dot(a.clone().sub(center)) < 0) face = [...face].reverse();
       indices.push(face[0],face[1],face[2],face[0],face[2],face[3]);
     }
-    geometry.setIndex(indices); geometry.computeVertexNormals();
-    const mesh = this.mesh(geometry, this.casePlastic(), 0, 0, 0, 0);
+    geometry.setIndex(indices);
+    const surfaceGeometry=geometry.toNonIndexed();
+    geometry.dispose();surfaceGeometry.computeVertexNormals();
+    const mesh = this.mesh(surfaceGeometry, prepareFramePlastic(prepareSpatialMaterial(this.casePlastic(),{surfaceField:true}),
+      this.frameSettings,GAP+FLOOR_THICKNESS,-GAP-FLOOR_THICKNESS), 0, 0, 0, 0);
     mesh.userData.surface = 'ramp'; mesh.castShadow = false;
     const desc = this.R.ColliderDesc.convexHull(vertices);
     if (!desc) throw Error('坂道の立体形状を生成できません');
     const collider = this.world.createCollider(desc.setFriction(.15).setRestitution(0));
     this.ramps.push({ c, mesh, collider });
+    this.lowerFloorMeshes.push(mesh);
     // The open ramp also admits light into the lower chamber near its entrance.
     const p = cellPos(c.x,c.z);
     const light = new T.PointLight(0xc3e9ff,.85,2.6,1.5);
@@ -1245,7 +1222,6 @@ export class Game {
         b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
         b.collider.setSensor(true);
         b.mesh.visible = false;
-        b.light.intensity = 0; b.light.userData.baseIntensity=0;
         this.sound.tone(0.7, 'alert');
       }
     }
@@ -1338,10 +1314,6 @@ export class Game {
     // separately so upper-floor sunlight never illuminates an unreached dark floor.
     for (let fi = this.stage.floors.length - 1; fi >= this.viewFloor; fi--) {
       this.camera.layers.set(fi + 1);
-      for(const b of this.balls){
-        const upper=exposureAt(b.mesh.position.y,b.radius);
-        b.light.intensity=(b.light.userData.baseIntensity??1.3)*(fi===0?upper:1-upper);
-      }
       if (this.wallSettings.resinDensity > 0) {
         for (const mesh of hidden) mesh.visible = false;
         this.renderer.setRenderTarget(this.wallBackgroundTarget);
@@ -1361,19 +1333,7 @@ export class Game {
     }
   }
   updateLowerRipples(dt) {
-    for (const b of this.balls) {
-      if (!['playing','replay'].includes(this.state) || (b.displayFloor ?? b.floor) !== 1 || (b.displayDone ?? b.done)) {
-        b.rippleClock = 0; continue;
-      }
-      b.rippleClock = (b.rippleClock ?? 0) - dt;
-      if (b.rippleClock > 0) continue;
-      b.rippleClock = .4;
-      const mesh = this.mesh(this.rippleGeometry,this.rippleMaterial.clone(),
-        b.mesh.position.x,.025,b.mesh.position.z,0);
-      mesh.rotation.x = -Math.PI/2; mesh.renderOrder = 1000;
-      mesh.userData.surface = 'lower-ball-ripple';
-      this.ripples.push({mesh,age:0});
-    }
+    // Position rings are intentionally disabled along with ball glow.
   }
   clearRipples() {
     for (const r of this.ripples) {
@@ -1523,7 +1483,6 @@ export class Game {
         b.displayFloor = f;
         b.displayDone = done;
         b.mesh.visible = !done;
-        b.light.intensity = done ? 0 : 1.3; b.light.userData.baseIntensity=done?0:1.3;
       }
       for (const e of this.enemies) {
         e.g.position.x = v[i++];

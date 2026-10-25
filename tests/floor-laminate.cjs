@@ -30,7 +30,7 @@ const assert=require('node:assert/strict');
  }));
  for(const [name,tilt] of [['top',{x:0,z:0}],['tilted',{x:.35,z:-.35}]]){
  await page.evaluate(tilt=>{const g=window.__toukan.game;g.tilt=tilt;g.renderScene()},tilt);
- await page.screenshot({path:`/workspace/ball-captures/2.2.5-${name}.png`});
+ await page.screenshot({path:`/workspace/ball-captures/2.2.6-${name}.png`});
  }
  assert.deepEqual(errors,[]);
  }finally{await browser.close()}
