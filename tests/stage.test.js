@@ -126,3 +126,12 @@ test('goals must be a single outward-facing perimeter exit', () => {
   s.floors[1].cells.push({...goal});
   assert.throws(() => validateStage(s), /1箇所/);
 });
+
+test('goal flare permits fixed walls on both adjoining cell edges and neighbouring materials', () => {
+  const s=defaultStage();
+  s.floors[0].walls.push({axis:'h',x:7,z:9},{axis:'h',x:7,z:10});
+  s.floors[0].cells.push({type:'sticky',x:7,z:8});
+  assert.doesNotThrow(()=>validateStage(s));
+  const shared=decodeStage(encodeStage(s));
+  assert.ok(shared.floors[0].walls.some(w=>w.axis==='h'&&w.x===7&&w.z===9));
+});

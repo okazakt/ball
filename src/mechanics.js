@@ -9,6 +9,12 @@ export function goalEdge(c) {
   const edge = sharedEdge(c,{x:c.x+dx,z:c.z+dz});
   return (edge.axis === 'h' ? edge.z === 0 || edge.z === ROWS : edge.x === 0 || edge.x === COLS) ? edge : null;
 }
+// A projecting threshold blends back into the wall over the neighbouring edge.
+// This is geometry, not an extra occupied editor cell.
+export function goalRevealAlong(across) {
+  const t = Math.max(0,Math.min(1,(Math.abs(across)-.30)/.36));
+  return .35+.125*t*t*(3-2*t);
+}
 export function insideGoal(p, radius, cell, fi) {
   if (!goalEdge(cell)) return false;
   const q = cellCenter(cell.x,cell.z), [dx,dz] = direction(cell);

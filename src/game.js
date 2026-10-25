@@ -1,7 +1,7 @@
 import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, HOLE_RADIUS, insideGoal, goalEdge, direction } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, HOLE_RADIUS, insideGoal, goalEdge, goalRevealAlong, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -753,8 +753,8 @@ export class Game {
     this.goalSurfaces.push({cell,fi});
     const p=cellPos(cell.x,cell.z), [dx,dz]=direction(cell);
     const radius=.125, height=fi === 0 ? LID_Y+FLOOR_THICKNESS : GAP;
-    // One extruded U section: threshold, tangent quarter-circles and jambs
-    // share the same depth and vertices, so neither corner can form a ledge.
+    // The threshold projects into the board and flares smoothly back into
+    // the jambs. Adjacent walls keep their own geometry and colliders.
     const shape=new T.Shape();
     shape.moveTo(-.66,-FLOOR_THICKNESS);shape.lineTo(.66,-FLOOR_THICKNESS);
     shape.lineTo(.66,height);shape.lineTo(.425,height);shape.lineTo(.425,radius);
@@ -762,11 +762,37 @@ export class Game {
     shape.lineTo(-.30,0);
     shape.absarc(-.30,radius,radius,-Math.PI/2,-Math.PI,true);
     shape.lineTo(-.425,height);shape.lineTo(-.66,height);shape.closePath();
-    const geometry=new T.ExtrudeGeometry(shape,{depth:.10,bevelEnabled:false,curveSegments:32});
+    let geometry=new T.ExtrudeGeometry(shape,{depth:.10,bevelEnabled:false,curveSegments:32});
+    // Split the straight sections before bending, so the flare is a curve
+    // rather than one straight bevel between its end points.
+    const original=geometry.attributes.position, refined=[];
+    const cuts=Array.from({length:61},(_,i)=>-.66+i*.022);
+    const clip=(polygon,cut,keepRight)=>{
+      const result=[];
+      for(let i=0;i<polygon.length;i++){
+        const a=polygon[i],b=polygon[(i+1)%polygon.length];
+        const ia=keepRight?a[0]>=cut:a[0]<=cut,ib=keepRight?b[0]>=cut:b[0]<=cut;
+        if(ia)result.push(a);
+        if(ia!==ib){const t=(cut-a[0])/(b[0]-a[0]);result.push(a.map((v,j)=>v+(b[j]-v)*t));}
+      }
+      return result;
+    };
+    for(let i=0;i<original.count;i+=3){
+      let pieces=[[0,1,2].map(j=>[original.getX(i+j),original.getY(i+j),original.getZ(i+j)])];
+      for(const cut of cuts){
+        pieces=pieces.flatMap(poly=>{
+          if(!poly.some(v=>v[0]<cut-1e-7)||!poly.some(v=>v[0]>cut+1e-7))return [poly];
+          return [clip(poly,cut,false),clip(poly,cut,true)].filter(p=>p.length>=3);
+        });
+      }
+      for(const poly of pieces)for(let j=1;j<poly.length-1;j++)refined.push(...poly[0],...poly[j],...poly[j+1]);
+    }
+    geometry.dispose();geometry=new T.BufferGeometry();
+    geometry.setAttribute('position',new T.Float32BufferAttribute(refined,3));
     // Shape XY is the cross-section; its extrusion runs through the wall.
     const position=geometry.attributes.position, path=[];
     for(let i=0;i<position.count;i++){
-      const across=position.getX(i), h=position.getY(i), along=.475+position.getZ(i);
+      const across=position.getX(i), h=position.getY(i), along=goalRevealAlong(across)+position.getZ(i);
       path.push(across,h);
       position.setXYZ(i,p.x+dx*along-dz*across,y+h+.001,p.z+dz*along+dx*across);
     }
@@ -780,6 +806,13 @@ export class Game {
     const reveal=this.mesh(geometry,material,0,0,0,fi);
     reveal.castShadow=reveal.receiveShadow=false;
     reveal.userData.surface='goal-curve';
+    // Static solids may intersect adjacent fixed walls, as at other wall
+    // junctions. They do not claim or exclude the neighbouring editor cells.
+    const vertices=Float32Array.from(position.array);
+    const indices=geometry.index ? Uint32Array.from(geometry.index.array)
+      : Uint32Array.from({length:position.count},(_,i)=>i);
+    this.world.createCollider(this.R.ColliderDesc.trimesh(vertices,indices)
+      .setFriction(.1).setRestitution(.1));
   }
 
 

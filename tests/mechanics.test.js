@@ -52,3 +52,13 @@ test('side exits require the whole ball to leave through the correct opening and
     }
   }
 });
+
+test('projecting goal threshold blends tangentially into the neighbouring side', async () => {
+  const {goalRevealAlong}=await import('../src/mechanics.js');
+  assert.equal(goalRevealAlong(0),.35);
+  assert.equal(goalRevealAlong(.66),.475);
+  for(const a of [.30,.42,.5,.66])assert.equal(goalRevealAlong(a),goalRevealAlong(-a));
+  const h=1e-5;
+  assert.ok(Math.abs((goalRevealAlong(.30+h)-goalRevealAlong(.30))/h)<.001);
+  assert.ok(Math.abs((goalRevealAlong(.66)-goalRevealAlong(.66-h))/h)<.001);
+});
