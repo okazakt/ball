@@ -32,7 +32,7 @@ const assert = require('node:assert/strict');
       };
       const floor = g.floorGroups[0].children.find(m => m.userData.surface === 'floor');
       const walls = g.floorGroups[0].children.find(m => m.userData.surface === 'walls');
-      if (Math.abs(area(floor.geometry) - 84.808) > 0.001 || !floor.material.map || floor.material.transparent || floor.material.opacity !== 1)
+      if (Math.abs(area(floor.geometry) - 84.808) > 0.001 || !floor.material[0].map || floor.material[0].transparent || floor.material[0].opacity !== 1 || floor.material[1].map || !floor.material[1].userData.frameUniforms)
         throw Error('Seamless wallpaper floor or floor hole missing');
       const side = walls.material;
       if (walls.children.length) throw Error('Separate wall ribs remain');

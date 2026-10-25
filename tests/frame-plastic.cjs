@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
  assert.equal(await page.locator('#wall-controls, #frame-controls, input[type=range]').count(), 0);
  const result=await page.evaluate(()=>{
  const g=window.__toukan.game;g.state='ready';g.tilt={x:.25,z:-.25};
- const meshes=[];g.board.traverse(m=>{if(m.material?.userData.frameUniforms)meshes.push(m)});
+ const meshes=[];g.board.traverse(m=>{if(m.material?.userData?.frameUniforms)meshes.push(m)});
  if(!meshes.some(m=>m.userData.surface==='door'))throw Error('Door fixture missing');
  const rows=[];
  for(const [key,min,max] of [['frameBevel',0,1],['frameEdgeHighlight',0,5],['frameGloss',1,30],['frameSSS',0,1],['frameCornerRadius',0,1],['frameAO',0,1]]) {

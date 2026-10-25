@@ -1,3 +1,4 @@
+import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
 import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
@@ -47,8 +48,10 @@ export class Game {
     const rebuild = before.frameBevel !== this.frameSettings.frameBevel ||
       before.frameCornerRadius !== this.frameSettings.frameCornerRadius;
     this.board?.traverse(mesh => {
-      if (!mesh.material?.userData.frameUniforms) return;
-      applyFrameSettings(mesh.material, this.frameSettings);
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const plastics = materials.filter(material => material?.userData?.frameUniforms);
+      if (!plastics.length) return;
+      for (const material of plastics) applyFrameSettings(material, this.frameSettings);
       if (rebuild && mesh.userData.frameGeometryFactory) {
         const old = mesh.geometry;
         mesh.geometry = mesh.userData.frameGeometryFactory();
@@ -311,8 +314,8 @@ export class Game {
         const positions = floorGeo.attributes.position, uvs = floorGeo.attributes.uv;
         for (let i = 0; i < positions.count; i++)
           uvs.setXY(i, positions.getX(i) / COLS + 0.5, 0.5 - positions.getZ(i) / ROWS);
-        const floorMat = this.floorMaterial(fi);
-        const floorMesh = this.mesh(floorGeo, floorMat, 0, y - 0.24, 0, fi);
+        const floorMat = this.floorMaterials(fi);
+        const floorMesh = this.mesh(fi === 0 ? laminateFloorGeometry(floorGeo) : floorGeo, floorMat, 0, y - FLOOR_THICKNESS, 0, fi);
         floorMesh.userData.surface = 'floor';
       }
       const perimeter = w => w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
@@ -596,6 +599,12 @@ export class Game {
     return new T.MeshPhysicalMaterial({ color: 0x269c67, roughness: .1, metalness: 0,
       clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
   }
+  floorMaterials(fi, bottom = 0) {
+    const paper = this.floorMaterial(fi);
+    if (fi !== 0) return paper;
+    const core = prepareFramePlastic(this.casePlastic(), this.frameSettings, FLOOR_THICKNESS, bottom);
+    return [paper, core];
+  }
   floorMaterial(fi) {
     let map = spaceTexture();
     if (fi > 0) {
@@ -617,7 +626,8 @@ export class Game {
       .rotateX(-Math.PI/2).translate(0,-FLOOR_THICKNESS,0);
     const positions = geometry.attributes.position, uv = geometry.attributes.uv;
     for(let i=0;i<positions.count;i++) uv.setXY(i,(positions.getX(i)+p.x)/COLS+.5,.5-(positions.getZ(i)+p.z)/ROWS);
-    const mesh = this.mesh(geometry,this.floorMaterial(fi),p.x,y,p.z,fi);
+    const mesh = this.mesh(fi === 0 ? laminateFloorGeometry(geometry) : geometry,
+      this.floorMaterials(fi,-FLOOR_THICKNESS),p.x,y,p.z,fi);
     mesh.userData.surface = 'hole-floor';
     this.world.createCollider(this.R.ColliderDesc.trimesh(positions.array,
       Uint32Array.from({length:positions.count},(_,i)=>i)).setTranslation(p.x,y,p.z).setFriction(.1).setRestitution(.1));
