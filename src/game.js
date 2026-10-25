@@ -646,8 +646,13 @@ export class Game {
       if (b.clone().sub(a).cross(d.clone().sub(a)).dot(a.clone().sub(center)) < 0) face = [...face].reverse();
       indices.push(face[0],face[1],face[2],face[0],face[2],face[3]);
     }
-    geometry.setIndex(indices); geometry.computeVertexNormals();
-    const mesh = this.mesh(geometry, this.casePlastic(), 0, 0, 0, 0);
+    geometry.setIndex(indices);
+    // Keep each planar face independent: averaging the slope/end normals into
+    // the sides makes a single flat side look twisted along its triangle seam.
+    const flatGeometry = geometry.toNonIndexed();
+    geometry.dispose();
+    flatGeometry.computeVertexNormals();
+    const mesh = this.mesh(flatGeometry, this.casePlastic(), 0, 0, 0, 0);
     mesh.userData.surface = 'ramp'; mesh.castShadow = false;
     const desc = this.R.ColliderDesc.convexHull(vertices);
     if (!desc) throw Error('坂道の立体形状を生成できません');

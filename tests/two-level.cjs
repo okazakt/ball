@@ -18,6 +18,22 @@ const fs = require('node:fs');
       const g=window.__toukan.game, original=structuredClone(g.stage), settings={...g.wallSettings};
       const check=(condition,message)=>{if(!condition)throw Error(message)};
       g.warmupRenderVariants=()=>{};
+      // Every ramp quad is one plane, including the full upper/lower side.
+      for (const rotation of [0,1,2,3]) {
+        const rampStage=structuredClone(original);
+        rampStage.floors[0].cells=rampStage.floors[0].cells.filter(c=>c.type!=='ramp');
+        rampStage.floors[0].cells.push({x:3,z:5,type:'ramp',rotation});
+        g.load(rampStage,false);
+        const geometry=g.ramps[0].mesh.geometry, p=geometry.attributes.position, n=geometry.attributes.normal;
+        check(!geometry.index,'Ramp faces must not share smoothed corner normals');
+        for(let i=0;i<p.count;i+=6) {
+          for(let j=0;j<6;j++) {
+            check(Math.hypot(n.getX(i+j)-n.getX(i),n.getY(i+j)-n.getY(i),n.getZ(i+j)-n.getZ(i))<1e-5,
+              'Ramp side has a shading seam between upper/lower vertices');
+          }
+        }
+      }
+      g.load(original,false);
       check(g.floorGroups.length===2 && g.lidReflections.length===1,'Exactly two floors and one outer lid required');
       const upperFloor=g.floorGroups[0].children.find(m=>m.userData.surface==='floor');
       upperFloor.geometry.computeBoundingBox();
