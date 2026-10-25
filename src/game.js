@@ -1,3 +1,4 @@
+import { STRONG_SHAKE_ACCELERATION, STRONG_SHAKE_TILT_RATE, STRONG_SHAKE_DURATION, ROBOT_STUN_RELEASE, robotShakeCharge, rightWallOrder, visionObstacles, sightDistance, visionPolygon } from './robot-behavior.js';
 import { FLOOR_WINDOW_OPACITY, FLOOR_WINDOW_SIDE_OPACITY, windowDaylight } from './translucent-floor.js';
 import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
@@ -278,6 +279,9 @@ export class Game {
     this.target = { x: 0, z: 0 };
     this.tilt = { x: 0, z: 0 };
     this.jumpAt = -10;
+    this.strongShakeUntil = -1;
+    this.robotShakeCharge = 0;
+    this.sightCache = new Map();
     this.state = 'ready';
     this.logStride =
       3 +
@@ -954,15 +958,8 @@ export class Game {
         c.type === 'slime' ? 0.3 : 0.6,
         0.21
       );
-    const shape = new T.Shape();
-    shape.moveTo(0, 0);
-    for (let j = 0; j <= 16; j++) {
-      const a = -0.5 + j / 16;
-      shape.lineTo(Math.sin(a) * 2, Math.cos(a) * 2);
-    }
-    shape.lineTo(0, 0);
     const cone = add(
-      new T.ShapeGeometry(shape),
+      new T.BufferGeometry(),
       new T.MeshBasicMaterial({
         color: 0xff2020,
         transparent: true,
@@ -975,6 +972,8 @@ export class Game {
       0
     );
     cone.rotation.x = Math.PI / 2;
+    cone.frustumCulled = false;
+    cone.castShadow = cone.receiveShadow = false;
     const badgeCanvas = document.createElement('canvas');
     badgeCanvas.width = 64;
     badgeCanvas.height = 64;
@@ -1086,7 +1085,9 @@ export class Game {
     window.addEventListener('deviceorientation', this.orientationHandler);
     this.motionHandler ??= (e) => {
       const a = e.acceleration;
-      if (a && Math.hypot(a.x || 0, a.y || 0, a.z || 0) > 16) this.jump();
+      const acceleration=a ? Math.hypot(a.x || 0,a.y || 0,a.z || 0) : 0;
+      if(acceleration>=STRONG_SHAKE_ACCELERATION)this.registerStrongShake(.16);
+      if(acceleration>16)this.jump('motion');
     };
     window.addEventListener('devicemotion', this.motionHandler);
   }
@@ -1097,9 +1098,19 @@ export class Game {
       this.makeNoise(p, b.floor, amount);
     }
   }
-  jump() {
+  registerStrongShake(window = .12) {
+    if(this.state==='playing')this.strongShakeUntil=Math.max(this.strongShakeUntil??-1,this.elapsed+window);
+  }
+  updateRobotShake(dt, tiltRate) {
+    if(tiltRate>=STRONG_SHAKE_TILT_RATE)this.registerStrongShake(.12);
+    this.robotShakeCharge=robotShakeCharge(this.robotShakeCharge??0,this.elapsed<(this.strongShakeUntil??-1),dt);
+    if(this.robotShakeCharge>=STRONG_SHAKE_DURATION-1e-9)
+      for(const e of this.enemies)if(e.c.type==='robot')e.stun=ROBOT_STUN_RELEASE;
+  }
+  jump(source = 'manual') {
     if (this.state !== 'playing' || this.elapsed - this.jumpAt < 0.28) return;
     this.jumpAt = this.elapsed;
+    if(source==='manual')this.registerStrongShake(.35);
     this.shake(1);
     for (const b of this.balls) {
       if (b.done) continue;
@@ -1108,7 +1119,7 @@ export class Game {
       if (p.y < ground + b.radius + 0.14 && b.sticky <= 0)
         b.body.applyImpulse({ x: 0, y: b.body.mass() * 6.3, z: 0 }, true);
     }
-    for (const e of this.enemies) e.stun = 1.4;
+    for (const e of this.enemies) if(e.c.type!=='robot')e.stun = 1.4;
     this.sound.tone(0.6);
   }
   makeNoise(p, fi, power) {
@@ -1139,18 +1150,37 @@ export class Game {
         return edge.axis===axis&&edge.x===wx&&edge.z===wz&&(fi===d.fi?!d.open:fi===1&&d.fi===0);
       });
   }
-  clearSight(fi, a, b) {
-    let px = Math.floor(a.x + COLS / 2),
-      pz = Math.floor(a.z + ROWS / 2);
-    const n = Math.ceil(Math.hypot(a.x - b.x, a.z - b.z) * 20);
-    for (let j = 1; j <= n; j++) {
-      const x = Math.floor(a.x + ((b.x - a.x) * j) / n + COLS / 2),
-        z = Math.floor(a.z + ((b.z - a.z) * j) / n + ROWS / 2);
-      if ((x !== px || z !== pz) && this.blocked(fi, px, pz, x, z)) return false;
-      px = x;
-      pz = z;
+  enemySightSegments(fi) {
+    const key=`${fi}:${this.wallSettings?.wallThickness??1}:${this.doors.map(d=>Number(d.open)).join('')}`;
+    this.sightCache??=new Map();
+    if(!this.sightCache.has(key)) {
+      // Keep only the current door configuration, rather than every past pose.
+      if(this.sightCache.size>4)this.sightCache.clear();
+      const half=this.wallHalfExtents(true).x;
+      this.sightCache.set(key,visionObstacles(this.stage,fi,half,half,this.doors));
     }
-    return true;
+    return this.sightCache.get(key);
+  }
+  clearSight(fi, a, b) {
+    const dx=b.x-a.x,dz=b.z-a.z,distance=Math.hypot(dx,dz);
+    return sightDistance(a,Math.atan2(dx,dz),this.enemySightSegments(fi),distance+.001)>=distance-.001;
+  }
+  updateEnemyVision(e) {
+    const origin={x:e.g.position.x,z:e.g.position.z},heading=e.g.rotation.y;
+    const polygon=visionPolygon(origin,heading,this.enemySightSegments(e.fi));
+    const geometry=e.cone.geometry,count=(polygon.length-1)*3;
+    let positions=geometry.getAttribute('position');
+    if(!positions || positions.count<count) {
+      positions=new T.BufferAttribute(new Float32Array(count*3),3).setUsage(T.DynamicDrawUsage);
+      geometry.setAttribute('position',positions);
+    }
+    const cosine=Math.cos(heading),sine=Math.sin(heading);
+    let i=0;
+    for(let j=1;j<polygon.length;j++)for(const point of [origin,polygon[j-1],polygon[j]]) {
+      const dx=point.x-origin.x,dz=point.z-origin.z;
+      positions.setXYZ(i++,cosine*dx-sine*dz,sine*dx+cosine*dz,0);
+    }
+    positions.needsUpdate=true;geometry.setDrawRange(0,count);
   }
   updateEnemies(dt) {
     const dirs = [
@@ -1165,6 +1195,9 @@ export class Game {
       e.badge.visible = e.state !== 'patrol' && e.stun === 0;
       if (e.stun > 0) {
         e.g.rotation.z = Math.sin(this.elapsed * 15) * 0.15;
+        if(e.c.type==='robot')e.g.children.forEach((m,i)=>{
+          if(m.userData.leg)m.rotation.x=Math.sin(this.elapsed*18+i*Math.PI)*.3;
+        });
         continue;
       }
       e.g.rotation.z = 0;
@@ -1176,7 +1209,7 @@ export class Game {
           dx = p.x - e.x,
           dz = p.z - e.z,
           d = Math.hypot(dx, dz);
-        if (d < 0.38 + b.radius && Math.abs(p.y + e.fi * GAP) < 0.8) {
+        if (d < 0.38 + b.radius && Math.abs(p.y + e.fi * GAP) < 0.8 && this.clearSight(e.fi,e,p)) {
           this.finish(false, e.c.type === 'robot' ? '警備ロボットに捕まりました' : 'ゼリーに回収されました', b);
           return;
         }
@@ -1213,7 +1246,10 @@ export class Game {
           (i) => !this.blocked(e.fi, cx, cz, cx + dirs[i][0], cz + dirs[i][1])
         );
         if (options.length) {
-          if (e.target)
+          if(e.c.type==='robot') {
+            const order=rightWallOrder(e.dir);
+            options.sort((a,b)=>order.indexOf(a)-order.indexOf(b));
+          } else if (e.target)
             options.sort((a, b) => {
               const pa = cellPos(cx + dirs[a][0], cz + dirs[a][1]),
                 pb = cellPos(cx + dirs[b][0], cz + dirs[b][1]);
@@ -1243,7 +1279,7 @@ export class Game {
         e.heading = Math.atan2(dx, dz);
       }
       e.g.position.set(e.x, -e.fi * GAP, e.z);
-      e.g.rotation.y = e.heading + (e.state === 'patrol' ? Math.sin(this.elapsed * 2) * 0.16 : 0);
+      e.g.rotation.y = e.heading + (e.c.type!=='robot' && e.state === 'patrol' ? Math.sin(this.elapsed * 2) * 0.16 : 0);
       e.g.children.forEach((m, i) => {
         if (m.userData.leg) m.rotation.x = Math.sin(this.elapsed * 11 + i * Math.PI) * 0.3;
       });
@@ -1262,8 +1298,10 @@ export class Game {
     const response = 1 - Math.pow(1 - 0.35, dt * 60);
     this.tilt.x += (this.target.x - this.tilt.x) * response;
     this.tilt.z += (this.target.z - this.tilt.z) * response;
-    if (Math.hypot(old.x - this.tilt.x, old.z - this.tilt.z) / dt > 1.6)
-      for (const e of this.enemies) e.stun = 1.4;
+    const tiltRate=Math.hypot(old.x-this.tilt.x,old.z-this.tilt.z)/dt;
+    this.updateRobotShake(dt,tiltRate);
+    if(tiltRate>1.6)
+      for(const e of this.enemies)if(e.c.type!=='robot')e.stun=1.4;
     this.world.gravity = {
       x: Math.sin(this.tilt.z) * TILT_GRAVITY,
       y: -Math.cos(this.tilt.x) * Math.cos(this.tilt.z) * GRAVITY,
@@ -1395,6 +1433,7 @@ export class Game {
       b.mesh.material.visible = true;
     }
     this.floorGroups.forEach((g, i) => (g.visible = i >= fi));
+    for(const e of this.enemies)this.updateEnemyVision(e);
     this.ambient.layers.disableAll();
     this.sun.layers.disableAll();
     for (let i = 0; i < 1; i++)
