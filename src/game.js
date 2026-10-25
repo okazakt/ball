@@ -600,13 +600,12 @@ export class Game {
       clearcoat: 1, clearcoatRoughness: .03, ior: 1.52, envMapIntensity: 2 });
   }
   floorMaterials(fi, bottom = 0) {
-    const paper = this.floorMaterial(fi);
-    if (fi !== 0) return paper;
     const core = prepareFramePlastic(this.casePlastic(), this.frameSettings, FLOOR_THICKNESS, bottom);
-    return [paper, core];
+    if (fi !== 0) return core;
+    return [this.floorMaterial(fi), core];
   }
   floorMaterial(fi) {
-    // Both floors use the same printed paper. Only the room lighting differs.
+    // Printed paper is applied only to the upper floor.
     return new T.MeshStandardMaterial({ color: 0xffffff,
       map: spaceTexture(), roughness: 1, metalness: 0, envMapIntensity: 0 });
   }

@@ -18,11 +18,11 @@ const assert=require('node:assert/strict');
  const u=m.material[1].userData.frameUniforms;
  for(const [key,value] of Object.entries(g.frameSettings))if(u[key].value!==value)throw Error('ABS settings mismatch');
  }
- const paper=upper[0].material[0];
+ const core=upper[0].material[1];
  for(const m of lower){
- if(Array.isArray(m.material)||!m.material.map)throw Error('Lower paper missing');
- if(m.material.color.getHex()!==paper.color.getHex()||m.material.roughness!==paper.roughness)throw Error('Paper finish differs');
- if(m.material.map.image.toDataURL()!==paper.map.image.toDataURL())throw Error('Printed pattern differs');
+ if(Array.isArray(m.material)||m.material.map||!m.material.userData.frameUniforms)throw Error('Lower ABS missing');
+ if(m.material.color.getHex()!==core.color.getHex()||m.material.roughness!==core.roughness)throw Error('ABS finish differs');
+ for(const [key,value] of Object.entries(g.frameSettings))if(m.material.userData.frameUniforms[key].value!==value)throw Error('Lower ABS settings mismatch');
  }
  g.updateFrameSettings({...g.frameSettings});
  document.querySelector('#start-panel').hidden=true;
@@ -30,7 +30,7 @@ const assert=require('node:assert/strict');
  }));
  for(const [name,tilt] of [['top',{x:0,z:0}],['tilted',{x:.35,z:-.35}]]){
  await page.evaluate(tilt=>{const g=window.__toukan.game;g.tilt=tilt;g.renderScene()},tilt);
- await page.screenshot({path:`/workspace/ball-captures/2.2.3-${name}.png`});
+ await page.screenshot({path:`/workspace/ball-captures/2.2.4-${name}.png`});
  }
  assert.deepEqual(errors,[]);
  }finally{await browser.close()}
