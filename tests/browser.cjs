@@ -56,7 +56,7 @@ const assert = require('node:assert/strict');
         throw Error('Plastic lighting settings are incorrect');
       if (g.floorGroups.some(f => f.children.some(m => ['start','start-bump'].includes(m.userData.surface))))
         throw Error('Start floor markers remain');
-      if (!g.floorGroups[0].children.some(m => m.userData.surface === 'goal-paint'))
+      if (!g.floorGroups[0].children.some(m => m.userData.surface === 'frame' && m.material.userData.goalPaint === 'frame'))
         throw Error('Side exit paint missing');
       const { solidGeometry, setRibFaces } = await import(new URL('./src/case-visuals.js', location.href).href);
       for (const rectangles of [

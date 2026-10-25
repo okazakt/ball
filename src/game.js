@@ -317,6 +317,7 @@ export class Game {
         const floorMat = this.floorMaterials(fi);
         const floorMesh = this.mesh(fi === 0 ? laminateFloorGeometry(floorGeo) : floorGeo, floorMat, 0, y - FLOOR_THICKNESS, 0, fi);
         floorMesh.userData.surface = 'floor';
+        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(floorMesh, goal, 'floor');
       }
       const perimeter = w => w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
       const exits = f.cells.filter(c => c.type === 'goal').map(goalEdge);
@@ -348,6 +349,7 @@ export class Game {
           0, fi === 0 ? y : y-FLOOR_THICKNESS, 0, fi);
         frame.userData.frameGeometryFactory = factory;
         frame.userData.surface = 'frame';
+        for (const goal of f.cells.filter(c => c.type === 'goal')) this.paintGoalReveal(frame, goal, 'frame');
         frame.castShadow = false;
       }
       for (const w of wallsForFloor) {
@@ -714,27 +716,41 @@ export class Game {
     }
     return true;
   }
+  paintGoalReveal(mesh, cell, kind) {
+    const p = cellPos(cell.x, cell.z), [dx,dz] = direction(cell);
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const previous = material.onBeforeCompile.bind(material);
+      const previousKey = material.customProgramCacheKey.bind(material);
+      material.onBeforeCompile = shader => {
+        previous(shader);
+        shader.uniforms.goalPaintCenter = {value:new T.Vector2(p.x,p.z)};
+        shader.uniforms.goalPaintDirection = {value:new T.Vector2(dx,dz)};
+        shader.vertexShader = 'varying vec3 vGoalPaintPosition;\n'+shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
+          '#include <begin_vertex>\nvGoalPaintPosition = position;');
+        shader.fragmentShader = 'varying vec3 vGoalPaintPosition; uniform vec2 goalPaintCenter; uniform vec2 goalPaintDirection;\n'+shader.fragmentShader;
+        // Paint the original rounded surface itself, including its bevels and
+        // full depth. Apply after display conversion to retain pure red/white.
+        shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', `
+          #include <dithering_fragment>
+          vec2 goalDelta = vGoalPaintPosition.xz-goalPaintCenter;
+          float goalAlong = dot(goalDelta,goalPaintDirection);
+          float goalAcross = dot(goalDelta,vec2(-goalPaintDirection.y,goalPaintDirection.x));
+          bool goalReveal = goalAlong > .35 && goalAlong < .70 &&
+            ${kind === 'frame' ? 'abs(goalAcross) > .34 && abs(goalAcross) < .66' : 'abs(goalAcross) < .50'};
+          if (goalReveal) {
+            float goalStripe = ${kind === 'frame' ? 'vGoalPaintPosition.y' : '(goalAcross+.5)'} * 10.;
+            gl_FragColor = vec4(mod(floor(goalStripe),2.) < 1. ? vec3(1.,0.,0.) : vec3(1.),1.);
+          }
+        `);
+      };
+      material.customProgramCacheKey = () => previousKey()+'-goal-reveal-'+kind;
+      material.needsUpdate = true;
+      material.userData.goalPaint = kind;
+    }
+  }
   createGoalExit(cell, y, fi) {
     this.goalSurfaces.push({cell,fi});
-    const p = cellPos(cell.x,cell.z), [dx,dz] = direction(cell);
-    // Paint the two jambs and threshold. The opening has no lintel.
-    // Match the perimeter's shadow policy; paint cannot cast a separate shadow.
-    const red = new T.MeshBasicMaterial({color:0xff0000,toneMapped:false});
-    const white = new T.MeshBasicMaterial({color:0xffffff,toneMapped:false});
-    const stripe = (x,h,z,w,height,d,mat) => {
-      const mesh = this.box(x,h,z,w,height,d,mat,fi,false);
-      mesh.castShadow = mesh.receiveShadow = false;
-      mesh.userData.surface = 'goal-paint';
-      return mesh;
-    };
-    for (let i=0;i<10;i++) {
-      const mat = i%2 ? white : red, t = -.5+(i+.5)/10;
-      for (const side of [-1,1])
-        stripe(p.x+dx*.53-dz*side*.47,y+(i+.5)/10,p.z+dz*.53+dx*side*.47,
-          dx ? .16 : .06,.1,dx ? .06 : .16,mat);
-      stripe(p.x+dx*.53-dz*t,y-.025,p.z+dz*.53+dx*t,
-        dx ? .16 : .1,.05,dx ? .1 : .16,mat);
-    }
   }
 
   start() {
