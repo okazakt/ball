@@ -73,6 +73,7 @@ test('quest begins with one ball, no enemies, bright floors and expanded bounds'
   assert.equal(s.balls.length, 1);
   assert.ok(s.floors.every((f) => !f.dark));
   assert.ok(s.floors.every((f) => !f.cells.some((c) => ['robot', 'spider', 'slime'].includes(c.type))));
+  s.floors[0].cells = s.floors[0].cells.filter(c => c.type !== 'goal');
   s.floors[1].cells.push({ x: 7, z: 10, type: 'goal' });
   assert.doesNotThrow(() => validateStage(s));
   s.floors[1].cells.push({ x: 8, z: 10, type: 'goal' });
@@ -90,7 +91,8 @@ test('quest uses adjacent upper/lower layers with upper start/goal and a corner 
 test('lower starts and goals survive sharing, with separate starts at equal coordinates', () => {
   const s = defaultStage();
   s.balls = [{ x:6,z:8,floor:0 }, { x:6,z:8,floor:1 }];
-  s.floors[1].cells.push({ x:6,z:9,type:'goal' });
+  s.floors[0].cells = s.floors[0].cells.filter(c => c.type !== 'goal');
+  s.floors[1].cells.push({ x:7,z:9,type:'goal',rotation:1 });
   const shared = decodeStage(encodeStage(s));
   assert.deepEqual(shared.balls,s.balls);
   assert.ok(shared.floors[1].cells.some(c => c.type === 'goal'));
@@ -114,4 +116,13 @@ test('initial lower chamber contains only its perimeter and the shared ramp',()=
  const s=defaultStage();assert.deepEqual(s.floors[1].cells,[]);
  assert.ok(s.floors[1].walls.every(w=>w.axis==='h'?[0,11].includes(w.z):[0,8].includes(w.x)));
  assert.ok(s.floors[0].cells.some(c=>c.type==='ramp'));
+});
+
+test('goals must be a single outward-facing perimeter exit', () => {
+  const s = defaultStage(), goal = s.floors[0].cells.find(c => c.type === 'goal');
+  goal.rotation = 3;
+  assert.throws(() => validateStage(s), /外周/);
+  goal.rotation = 1;
+  s.floors[1].cells.push({...goal});
+  assert.throws(() => validateStage(s), /1箇所/);
 });

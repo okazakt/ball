@@ -1,4 +1,4 @@
-import { footprint, doorSpec } from './mechanics.js';
+import { footprint, doorSpec, goalEdge } from './mechanics.js';
 import { COLS, ROWS, clone, validateStage, wallKey } from './stage.js';
 const labels = {
   wall: '直線壁',
@@ -6,7 +6,7 @@ const labels = {
   erase: '消しゴム',
   ball: 'スタート／玉',
   hole: '穴',
-  goal: 'ゴール',
+  goal: '側面出口（外向き）',
   sticky: '粘着床',
   door: '昇降ドア（1マス・選択辺）',
   ramp: '坂道（2マス）',
@@ -184,6 +184,7 @@ export class Editor {
       if (candidate.balls.length >= 3) { this.toast('玉は最大3個です。消しゴムで移動できます'); return; }
       candidate.balls.push({ x,z,floor:this.fi });
     } else {
+      if (this.tool === 'goal') candidate.floors.forEach(f => { f.cells = f.cells.filter(c => c.type !== 'goal'); });
       const owner = this.tool === 'ramp' ? 0 : this.fi;
       candidate.floors[owner].cells.push({ x,z,type:this.tool,rotation:this.rotation,
         rule: this.tool === 'slime' ? 'random' : this.rotation % 2 ? 'left' : 'right' });
@@ -238,7 +239,7 @@ export class Editor {
         c.fillRect((d.x+COLS/2-d.halfX)*60,(d.z+ROWS/2-d.halfZ)*60,d.halfX*120,d.halfZ*120);}
       c.fillStyle = '#10232f'; c.font = '10px sans-serif'; c.textAlign = 'center';
       c.fillText(t.lowerView && t.type === 'door' ? '昇降・支柱' : t.type === 'door' ? '昇降ドア' : t.type === 'ramp' ? '坂道' : labels[t.type], x+width/2,z+height/2);
-      if (cells.length === 2 || t.rotation || t.type === 'door') c.fillText(['↓','→','↑','←'][t.rotation ?? 0],x+width/2,z+height/2+15);
+      if (cells.length === 2 || t.rotation || t.type === 'door' || t.type === 'goal') c.fillText(['↓','→','↑','←'][t.rotation ?? 0],x+width/2,z+height/2+15);
     }
     for (const b of this.stage.balls) if ((b.floor ?? 0) === this.fi) {
       c.fillStyle = '#176bff'; c.fillRect(b.x*60+1,b.z*60+1,58,58);
@@ -251,6 +252,14 @@ export class Editor {
       c.moveTo(w.x * 60, w.z * 60);
       c.lineTo((w.x + (w.axis === 'h' ? 1 : 0)) * 60, (w.z + (w.axis === 'v' ? 1 : 0)) * 60);
       c.stroke();
+    }
+    for (const t of materials.filter(t => t.type === 'goal')) {
+      const e = goalEdge(t); if (!e) continue;
+      for (let i=0;i<10;i++) {
+        c.strokeStyle = i%2 ? '#ffffff' : '#ef334b'; c.lineWidth = 8;
+        c.beginPath(); c.moveTo(e.x*60+(e.axis==='h'?i*6:0),e.z*60+(e.axis==='v'?i*6:0));
+        c.lineTo(e.x*60+(e.axis==='h'?(i+1)*6:0),e.z*60+(e.axis==='v'?(i+1)*6:0)); c.stroke();
+      }
     }
     const select = document.querySelector('#edit-floor');
     select.replaceChildren(...this.stage.floors.map((_, i) => new Option(i === 0 ? '上段' : '下段', i)));

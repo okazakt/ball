@@ -46,11 +46,11 @@ const fs = require('node:fs');
       check(d.slide>.99&&Math.abs(d.mesh.position.y+.6)<1e-6,'Door did not retract below the slot');
       check(Math.abs(d.mesh.position.x-d.x)<1e-6&&Math.abs(d.mesh.position.z-d.z)<1e-6,'Lift door moved sideways');
       // A creator may start and finish in the lower layer; camera still stays above.
-      const lower=structuredClone(original);lower.balls=[{x:6,z:8,floor:1}];lower.floors[1].cells.push({x:6,z:9,type:'goal'});
+      const lower=structuredClone(original);lower.balls=[{x:6,z:8,floor:1}];lower.floors[0].cells=lower.floors[0].cells.filter(c=>c.type!=='goal');lower.floors[1].cells.push({x:7,z:9,type:'goal',rotation:1});
       g.load(validateStage(lower),false);b=g.balls[0];check(b.floor===1&&b.body.translation().y<0,'Lower start was ignored');
-      g.state='playing';b.body.setTranslation({x:2.5,y:-GAP+b.radius+.01,z:4},true);g.step(1/60);
+      g.state='playing';b.body.setTranslation({x:3.5,y:-GAP+b.radius+.01,z:4},true);b.body.setLinvel({x:2,y:0,z:0},true);g.step(1/60);
       for(let i=0;i<30&&!b.done;i++)g.step(1/60);
-      check(b.done&&g.outcome?.won&&g.viewFloor===0,'Lower goal contact or fixed camera failed');
+      check(b.done&&g.outcome?.won&&g.viewFloor===0,'Lower side exit or fixed camera failed');
       // Replay vertical door travel without changing viewpoint.
       g.load(original,false);d=g.doors[0];g.recordFrame();g.setDoorVisual(d,1);d.open=true;g.recordFrame();
       g.outcome={floor:1,ballIndex:0,reason:'test',won:false};g.playReplay(true);g.updateReplay(.1);

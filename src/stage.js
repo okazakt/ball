@@ -1,4 +1,4 @@
-import { COLS, ROWS, GAP, footprint, sharedEdge, direction, doorEdge } from './mechanics.js';
+import { COLS, ROWS, GAP, footprint, sharedEdge, direction, doorEdge, goalEdge } from './mechanics.js';
 export { COLS, ROWS, GAP };
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 export const wallKey = (axis, x, z) => `${axis}:${x}:${z}`;
@@ -29,8 +29,9 @@ export function defaultStage() {
     { x: 3, z: 2, type: 'door', rotation: 0 },
     { x: 2, z: 2, type: 'switch' },
     { x: 0, z: 9, type: 'ramp', rotation: 2 },
-    { x: 6, z: 9, type: 'goal' },
+    { x: 7, z: 9, type: 'goal', rotation: 1 },
   ];
+  a.walls = a.walls.filter(w => !(w.axis === 'v' && w.x === COLS && w.z === 9));
   // Lower chamber: perimeter only. The upper ramp connects into it.
   return {
     version: 1,
@@ -141,7 +142,10 @@ export function validateStage(s, { allowIncomplete = false } = {}) {
             throw Error('坂道の上側出口に仕切り壁があります');
         }
       }
-      if (c.type === 'goal') goals++;
+      if (c.type === 'goal') {
+        if (!goalEdge(c)) throw Error('ゴールは外周に配置し、出口を外側へ向けてください');
+        goals++;
+      }
       if (c.type === 'hole' && i === s.floors.length - 1)
         throw Error('下段には穴を配置できません');
     }
@@ -150,7 +154,8 @@ export function validateStage(s, { allowIncomplete = false } = {}) {
     const material = occupiedLayers[p.floor ?? 0].get(`${p.x},${p.z}`);
     if (material && !['sticky','switch'].includes(material.type)) throw Error('玉の開始位置に素材・可動域があります');
   }
-  if (!goals && !allowIncomplete) throw Error('ゴールを1つ以上配置してください');
+  if (goals > 1) throw Error('ゴールは上下段のいずれか1箇所に配置してください');
+  if (!goals && !allowIncomplete) throw Error('ゴールを1つ配置してください');
   return clone(s);
 }
 export function encodeStage(s) {

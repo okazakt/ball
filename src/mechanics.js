@@ -4,11 +4,20 @@ export const direction = c => DIRECTIONS[c.rotation ?? 0];
 export const cellCenter = (x, z) => ({ x: x - (COLS - 1) / 2, z: z - (ROWS - 1) / 2 });
 export const MARKER_EDGE = .46, MARKER_BUMP_RADIUS = .035;
 export const HOLE_RADIUS = .48;
+// Goals are outward-facing openings in the perimeter, one cell wide.
+export function goalEdge(c) {
+  const [dx,dz] = direction(c);
+  const edge = sharedEdge(c,{x:c.x+dx,z:c.z+dz});
+  return (edge.axis === 'h' ? edge.z === 0 || edge.z === ROWS : edge.x === 0 || edge.x === COLS) ? edge : null;
+}
 export function insideGoal(p, radius, cell, fi) {
-  const q = cellCenter(cell.x, cell.z);
-  const inset = MARKER_EDGE - MARKER_BUMP_RADIUS;
-  return Math.abs(p.x-q.x) < inset && Math.abs(p.z-q.z) < inset
-    && Math.abs(p.y-(-fi*GAP+radius)) < .06;
+  if (!goalEdge(cell)) return false;
+  const q = cellCenter(cell.x,cell.z), [dx,dz] = direction(cell);
+  const along = (p.x-q.x)*dx+(p.z-q.z)*dz;
+  const across = (p.x-q.x)*(-dz)+(p.z-q.z)*dx;
+  return along > .5+radius && along < 1
+    && Math.abs(across) < .45-radius
+    && p.y > -fi*GAP-.55 && p.y < -fi*GAP+.9;
 }
 export function footprint(c) {
   const [dx, dz] = direction(c);

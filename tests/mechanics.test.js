@@ -38,3 +38,17 @@ test('retracted door cap stays inside the floor channel, with safe telescoping s
  assert.ok(pose.panelY+.46<-.1);assert.ok(pose.panelY+.46>-.24);
  assert.ok(pose.postHeight>0);
 });
+
+test('side exits require the whole ball to leave through the correct opening and layer', async () => {
+  const {insideGoal,cellCenter} = await import('../src/mechanics.js');
+  for (const cell of [{x:7,z:5,rotation:1},{x:0,z:5,rotation:3},{x:3,z:0,rotation:2},{x:3,z:10,rotation:0}]) {
+    const q=cellCenter(cell.x,cell.z), dirs=[[0,1],[1,0],[0,-1],[-1,0]], [dx,dz]=dirs[cell.rotation];
+    for(const fi of [0,1]) {
+      const p={x:q.x+dx*.75,z:q.z+dz*.75,y:-fi*GAP+.1};
+      assert.ok(insideGoal(p,.2,cell,fi));
+      assert.ok(!insideGoal({...p,x:q.x,z:q.z},.2,cell,fi));
+      assert.ok(!insideGoal({...p,y:p.y-GAP},.2,cell,fi));
+      assert.ok(!insideGoal({...p,x:p.x-dz*.4,z:p.z+dx*.4},.2,cell,fi));
+    }
+  }
+});

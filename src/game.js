@@ -1,7 +1,7 @@
 import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, direction } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, MARKER_EDGE, MARKER_BUMP_RADIUS, HOLE_RADIUS, insideGoal, goalEdge, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -319,7 +319,9 @@ export class Game {
         floorMesh.userData.surface = 'floor';
       }
       const perimeter = w => w.axis === 'h' ? w.z === 0 || w.z === ROWS : w.x === 0 || w.x === COLS;
-      const wallRects = f.walls.filter(w => !perimeter(w)).map(w => {
+      const exits = f.cells.filter(c => c.type === 'goal').map(goalEdge);
+      const wallsForFloor = f.walls.filter(w => !exits.some(e => e && e.axis === w.axis && e.x === w.x && e.z === w.z));
+      const wallRects = wallsForFloor.filter(w => !perimeter(w)).map(w => {
         const x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
         return [x - 3.8, z - 3.8, x + (w.axis === 'h' ? 103.8 : 3.8), z + (w.axis === 'v' ? 103.8 : 3.8)];
       });
@@ -330,7 +332,7 @@ export class Game {
         walls.castShadow = false;
         walls.userData.surface = 'walls';
       }
-      const frameRects = f.walls.filter(perimeter).map(w => {
+      const frameRects = wallsForFloor.filter(perimeter).map(w => {
         let x = (w.x - COLS / 2) * 100, z = (w.z - ROWS / 2) * 100;
         if (w.axis === 'h') {
           z += w.z === 0 ? -2.5 : 2.5;
@@ -339,16 +341,16 @@ export class Game {
         x += w.x === 0 ? -2.5 : 2.5;
         return [x - 5, z - 7.5, x + 5, z + 107.5];
       });
-      if (frameRects.length && fi === 0) {
-        const height = GAP + LID_Y + FLOOR_THICKNESS;
+      if (frameRects.length) {
+        const height = fi === 0 ? LID_Y + FLOOR_THICKNESS : GAP + FLOOR_THICKNESS;
         const factory = () => frameGeometry(frameRects, height, this.frameSettings);
         const frame = this.mesh(factory(), prepareFramePlastic(this.casePlastic(), this.frameSettings, height),
-          0, -GAP - FLOOR_THICKNESS, 0, fi);
+          0, fi === 0 ? y : y-FLOOR_THICKNESS, 0, fi);
         frame.userData.frameGeometryFactory = factory;
         frame.userData.surface = 'frame';
         frame.castShadow = false;
       }
-      for (const w of f.walls) {
+      for (const w of wallsForFloor) {
         const p = cellPos(w.x, w.z), vertical = w.axis === 'v';
         const half = perimeter(w) ? { x: vertical ? 0.05 : 0.55, y: 0.5, z: vertical ? 0.55 : 0.05 }
           : this.wallHalfExtents(vertical);
@@ -438,7 +440,7 @@ export class Game {
           );
           glow.userData.persistentLight = true;
         }
-        if (c.type === 'goal') this.markCell(c, y, fi, 0xef334b, 'goal');
+        if (c.type === 'goal') this.createGoalExit(c, y, fi);
         if (c.type === 'sticky') {
           const mesh = this.box(
             p.x,
@@ -714,6 +716,23 @@ export class Game {
     }
     return true;
   }
+  createGoalExit(cell, y, fi) {
+    this.goalSurfaces.push({cell,fi});
+    const p = cellPos(cell.x,cell.z), [dx,dz] = direction(cell);
+    // Stripe the reveal on both jambs, the lintel and the threshold.
+    const red = new T.MeshStandardMaterial({color:0xef334b,roughness:.6});
+    const white = new T.MeshStandardMaterial({color:0xffffff,roughness:.6});
+    for (let i=0;i<10;i++) {
+      const mat = i%2 ? white : red, t = -.5+(i+.5)/10;
+      for (const side of [-1,1]) {
+        this.box(p.x+dx*.53-dz*side*.47,y+(i+.5)/10,p.z+dz*.53+dx*side*.47,
+          dx ? .16 : .06,.1,dx ? .06 : .16,mat,fi,false);
+      }
+      for (const h of [-.025,1.015])
+        this.box(p.x+dx*.53-dz*t,y+h,p.z+dz*.53+dx*t,
+          dx ? .16 : .1,.05,dx ? .1 : .16,mat,fi,false);
+    }
+  }
   markCell(cell, y, fi, color, kind) {
     const p = cellPos(cell.x, cell.z);
     const tile = this.mesh(new T.PlaneGeometry(1, 1),
@@ -721,11 +740,6 @@ export class Game {
     tile.rotation.x = -Math.PI / 2;
     tile.castShadow = tile.receiveShadow = false;
     tile.userData.surface = kind;
-    if (kind === 'goal') {
-      const collider = this.world.createCollider(this.R.ColliderDesc.cuboid(.46,.002,.46)
-        .setTranslation(p.x,y+.002,p.z).setFriction(.1).setRestitution(0));
-      this.goalSurfaces.push({cell,fi,collider,y:y+.004});
-    }
     // Rounded, low ridges on all four edges. The same radius is used by Rapier.
     for (const axis of ['x', 'z']) for (const sign of [-1, 1]) {
       const x = p.x + (axis === 'z' ? sign * MARKER_EDGE : 0);
@@ -1197,6 +1211,15 @@ export class Game {
       const p = b.body.translation(),
         v = b.body.linvel();
       b.prevSpeed = Math.hypot(v.x, v.y, v.z);
+      if (this.goalSurfaces.some(goal => goal.fi === b.floor && insideGoal(p,b.radius,goal.cell,goal.fi))) {
+        b.done = true;
+        b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
+        b.collider.setSensor(true);
+        b.mesh.visible = false;
+        b.light.intensity = 0; b.light.userData.baseIntensity=0;
+        this.sound.tone(0.7, 'alert');
+      }
+      if (b.done) continue;
       if (Math.abs(p.x) > COLS / 2 + 0.5 || Math.abs(p.z) > ROWS / 2 + 0.5 || p.y < -this.stage.floors.length * GAP) {
         this.finish(false, '盤面の外に落ちました', b);
         return;
@@ -1230,19 +1253,7 @@ export class Game {
           this.events.status?.('磁力ネット！ シェイク連打で脱出');
         }
       }
-      if (this.goalSurfaces.some(goal => {
-        if (goal.fi !== b.floor || !insideGoal(p,b.radius,goal.cell,b.floor)) return false;
-        const contact = b.collider.contactCollider(goal.collider,.001);
-        return contact && contact.distance <= .001 && contact.normal2.y > .9
-          && Math.abs(contact.point2.y-goal.y) < .002;
-      }) && b.sticky <= 0) {
-        b.done = true;
-        b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
-        b.collider.setSensor(true);
-        b.mesh.visible = false;
-        b.light.intensity = 0; b.light.userData.baseIntensity=0;
-        this.sound.tone(0.7, 'alert');
-      }
+
     }
     this.updateEnemies(dt);
     if (this.state !== 'playing') return;
