@@ -18,6 +18,12 @@ function maze(paths) {
     if(!openings.has(`v:${x}:${z}`)) f.walls.push({axis:'v',x,z});
   return f;
 }
+// Stage 1 uses all 88 cells: a 58-cell solution and two 15-cell detours.
+const fullBoardRoute = [[0,0],[0,10],[1,10],[1,0],[2,0],[2,10],[3,10],[3,0],[7,0],[7,10]];
+const fullBoardBranches = [
+  [[4,0],[4,1],[6,1],[6,2],[4,2],[4,3],[6,3],[6,4],[4,4],[4,5],[6,5]],
+  [[7,6],[6,6],[6,10],[5,10],[5,6],[4,6],[4,10]],
+];
 const winding = [[0,0],[7,0],[7,2],[1,2],[1,4],[6,4],[6,6],[1,6],[1,8],[7,8],[7,10]];
 const branches = [[[4,0],[4,1]], [[4,6],[4,7],[3,7]]];
 export const QUESTS = [
@@ -29,7 +35,8 @@ export const QUESTS = [
 export function questStage(index=0) {
   if(!QUESTS[index]) throw Error('クエストがありません');
   let upper;
-  if(index===0 || index===3) upper=maze([winding,...branches]);
+  if(index===0) upper=maze([fullBoardRoute,...fullBoardBranches]);
+  if(index===3) upper=maze([winding,...branches]);
   if(index===1) {
     upper=maze([[[0,0],[5,0],[5,3],[2,3],[2,6],[6,6],[6,8],[3,8],[3,10],[7,10]],
       [[5,0],[6,0]], [[2,3],[1,3]], [[0,3],[0,0]]]);
