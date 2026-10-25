@@ -1,5 +1,3 @@
-import { FRAME_CONTROLS } from './frame-plastic.js';
-import { wallDiagnostics } from './wall-diagnostics.js';
 import { keepScreenAwake } from './wake-lock.js';
 import { VERSION } from './version.js';
 import { Game } from './game.js';
@@ -79,101 +77,6 @@ const game = new Game($('#viewport'), sound, {
     $('#video').textContent = blob ? '動画を保存 / 共有' : 'このブラウザは録画非対応';
   },
 });
-const wallPanel = document.createElement('details');
-wallPanel.id = 'wall-controls';
-const wallSummary = document.createElement('summary');
-wallSummary.textContent = '外壁・緑プラ素材調整 / 壁の描画診断';
-wallPanel.append(wallSummary);
-const wallFields = document.createElement('div');
-wallFields.className = 'wall-fields';
-const frameTitle = document.createElement('h3');
-frameTitle.textContent = '外壁・緑プラ素材調整（自動ドア共通）';
-wallFields.append(frameTitle);
-for (const [key, title, min, max] of FRAME_CONTROLS) {
-  const label = document.createElement('label');
-  const caption = document.createElement('span');
-  caption.textContent = `${title} / ${key}`;
-  const input = document.createElement('input');
-  Object.assign(input, { id: key, type: 'range', min, max, step: .01, value: game.frameSettings[key] });
-  label.htmlFor = key;
-  const output = document.createElement('output');
-  output.htmlFor = key;
-  output.value = Number(input.value).toFixed(2);
-  input.addEventListener('input', () => {
-    output.value = Number(input.value).toFixed(2);
-    game.updateFrameSettings({ [key]: Number(input.value) });
-  });
-  label.append(caption, output, input);
-  wallFields.append(label);
-}
-const diagnosticButton = document.createElement('button');
-diagnosticButton.id = 'wall-diagnose';
-diagnosticButton.type = 'button';
-diagnosticButton.textContent = '壁の描画診断を表示';
-const diagnosticText = document.createElement('textarea');
-diagnosticText.id = 'wall-diagnostic-result';
-diagnosticText.readOnly = true;
-diagnosticText.hidden = true;
-diagnosticText.setAttribute('aria-label', '壁の描画診断結果');
-const copyDiagnostic = document.createElement('button');
-copyDiagnostic.type = 'button';
-copyDiagnostic.textContent = '診断結果をコピー';
-copyDiagnostic.hidden = true;
-diagnosticButton.onclick = () => {
-  if (!game.ready || !game.stage) return;
-  diagnosticText.value = JSON.stringify(wallDiagnostics(game, VERSION), null, 2);
-  diagnosticText.hidden = copyDiagnostic.hidden = false;
-};
-copyDiagnostic.onclick = async () => {
-  try {
-    await navigator.clipboard.writeText(diagnosticText.value);
-    toast('診断結果をコピーしました');
-  } catch {
-    diagnosticText.focus(); diagnosticText.select();
-    toast('診断結果を選択しました。コピーしてください');
-  }
-};
-wallFields.append(diagnosticButton, diagnosticText, copyDiagnostic);
-for (const [key, title, min, max] of [
-  ['edgeWidth', '白帯の幅比率 / edgeWidth', 0.05, 0.5],
-  ['edgeBrightness', '両フチの輝度 / edgeBrightness', 0, 5],
-  ['sideGloss', '側面のツヤ / sideGloss', 0, 3],
-  ['bottomEdge', '根元の接地帯 / bottomEdge', 0, 1],
-  ['centerOpacity', '中央の不透明度 / centerOpacity', 0, 0.5],
-  ['taperAngle', '抜き勾配 / taperAngle', 0, 0.8],
-  ['cornerRadius', '先端・角の丸み / cornerRadius', 0, 1],
-  ['lightAngle', '光源の角度 / lightAngle', 0, 3.14],
-  ['specularSharpness', '光の鋭さ / specularSharpness', 1, 20],
-  ['resinTint', '樹脂の色味・ミルク感 / resinTint', 0, 1],
-  ['topFusion', '天井との結合部 / topFusion', 0, 1],
-  ['bottomFusion', '床との接着・結合部 / bottomFusion', 0, 1],
-  ['resinDensity', '樹脂の内部密度 / resinDensity', 0, 1],
-  ['wallThickness', '壁の厚み・ボリューム / wallThickness', 0.5, 2],
-]) {
-  const label = document.createElement('label');
-  label.htmlFor = `wall-${key}`;
-  const caption = document.createElement('span');
-  caption.textContent = title;
-  const output = document.createElement('output');
-  output.htmlFor = `wall-${key}`;
-  const input = document.createElement('input');
-  Object.assign(input, { id: `wall-${key}`, type: 'range', min, max, step: 0.01,
-    value: game.wallSettings[key], disabled: true });
-  output.value = Number(input.value).toFixed(2);
-  input.addEventListener('input', () => {
-    output.value = Number(input.value).toFixed(2);
-    game.updateWallSettings({ [key]: Number(input.value) });
-  });
-  label.append(caption, output, input);
-  wallFields.append(label);
-}
-// Keep native range gestures and keyboard controls, without tilting the board.
-for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
-  'touchstart', 'touchmove', 'touchend', 'click', 'dblclick', 'keydown'])
-  wallPanel.addEventListener(type, event => event.stopPropagation());
-wallPanel.append(wallFields);
-$('#viewport').append(wallPanel);
-
 function showResult(r) {
   $('#result-tag').textContent = r.won ? 'MISSION COMPLETE' : 'SIGNAL LOST';
   $('#result-title').textContent = r.won ? '光の先に、到着。' : 'もう一度、そっと。';

@@ -1,12 +1,12 @@
 import { solidGeometry } from './case-visuals.js';
 const T = window.THREE;
 export const FRAME_CONTROLS = [
-  ['frameBevel', '角の丸み・エッジの太さ', 0, 1, .4],
-  ['frameEdgeHighlight', '角ハイライトの輝度', 0, 5, 1.8],
-  ['frameGloss', '表面のツヤ・光沢の鋭さ', 1, 30, 10],
-  ['frameSSS', '樹脂の柔らかさ・光の回り込み', 0, 1, .3],
-  ['frameCornerRadius', '四隅コーナーの内R・一体感', 0, 1, .5],
-  ['frameAO', '内側の影の濃さ・立体感', 0, 1, .4],
+  ['frameBevel', '角の丸み・エッジの太さ', 0, 1, .96],
+  ['frameEdgeHighlight', '角ハイライトの輝度', 0, 5, 4.12],
+  ['frameGloss', '表面のツヤ・光沢の鋭さ', 1, 30, 2.20],
+  ['frameSSS', '樹脂の柔らかさ・光の回り込み', 0, 1, .79],
+  ['frameCornerRadius', '四隅コーナーの内R・一体感', 0, 1, .92],
+  ['frameAO', '内側の影の濃さ・立体感', 0, 1, .93],
 ];
 export const FRAME_DEFAULTS = Object.freeze(Object.fromEntries(FRAME_CONTROLS.map(([key,,,, value]) => [key, value])));
 
