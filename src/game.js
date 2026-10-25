@@ -1,7 +1,7 @@
 import { laminateFloorGeometry } from './floor-laminate.js';
 import { FRAME_DEFAULTS, FRAME_CONTROLS, frameGeometry, prepareFramePlastic, applyFrameSettings } from './frame-plastic.js';
 import { prepareSpatialMaterial, updateSpatialMaterial, exposureAt } from './spatial-lighting.js';
-import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, HOLE_RADIUS, insideGoal, goalEdge, direction } from './mechanics.js';
+import { FLOOR_THICKNESS, floorRectangles, doorSpec, doorPose, doorEdge, slotSkyVisibility, rampHull, footprint, HOLE_RADIUS, insideGoal, crossedGoal, goalEdge, direction } from './mechanics.js';
 import { inspectDraw } from './wall-diagnostics.js';
 import { FIXED_WALL_SETTINGS } from './wall-settings.js';
 import { COLS, ROWS, GAP } from './stage.js';
@@ -825,6 +825,18 @@ export class Game {
     }
   }
 
+  checkGoal(ball, previous) {
+    if (ball.done) return;
+    const b=ball, p=b.body.translation();
+    if (!this.goalSurfaces.some(goal => goal.fi === b.floor &&
+      (crossedGoal(previous,p,b.radius,goal.cell,goal.fi) || insideGoal(p,b.radius,goal.cell,goal.fi)))) return;
+    b.done = true;
+    b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
+    b.collider.setSensor(true);
+    b.mesh.visible = false;
+    b.light.intensity = 0; b.light.userData.baseIntensity=0;
+    this.sound.tone(0.7, 'alert');
+  }
   start() {
     if (this.state !== 'ready') return;
     this.keys.clear();
@@ -1263,7 +1275,9 @@ export class Game {
         door.postCollider.setHalfHeight(pose.postHeight/2);
         door.postBody.setNextKinematicTranslation({x:door.x,y:pose.postY,z:door.z});
       }
+      const previousPositions=this.balls.map(b=>b.body.translation());
       this.world.step(this.queue);
+      this.balls.forEach((b,i)=>this.checkGoal(b,previousPositions[i]));
       this.queue.drainCollisionEvents((h1, h2, started) => {
         if (!started) return;
         for (const b of this.balls)
@@ -1281,15 +1295,6 @@ export class Game {
       const p = b.body.translation(),
         v = b.body.linvel();
       b.prevSpeed = Math.hypot(v.x, v.y, v.z);
-      if (this.goalSurfaces.some(goal => goal.fi === b.floor && insideGoal(p,b.radius,goal.cell,goal.fi))) {
-        b.done = true;
-        b.body.setBodyType(this.R.RigidBodyType.Fixed, true);
-        b.collider.setSensor(true);
-        b.mesh.visible = false;
-        b.light.intensity = 0; b.light.userData.baseIntensity=0;
-        this.sound.tone(0.7, 'alert');
-      }
-      if (b.done) continue;
       if (Math.abs(p.x) > COLS / 2 + 0.5 || Math.abs(p.z) > ROWS / 2 + 0.5 || p.y < -this.stage.floors.length * GAP) {
         this.finish(false, '盤面の外に落ちました', b);
         return;

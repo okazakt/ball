@@ -14,9 +14,23 @@ export function insideGoal(p, radius, cell, fi) {
   const q = cellCenter(cell.x,cell.z), [dx,dz] = direction(cell);
   const along = (p.x-q.x)*dx+(p.z-q.z)*dz;
   const across = (p.x-q.x)*(-dz)+(p.z-q.z)*dx;
-  return along > .5+radius && along < 1
-    && Math.abs(across) < .45-radius
-    && p.y > -fi*GAP-.55 && p.y < -fi*GAP+.9;
+  return along >= .5 && along < 1
+    && Math.abs(across) <= .5-radius+.015
+    && p.y > -fi*GAP-.15 && p.y < -fi*GAP+.9;
+}
+// Test the exit plane along the swept path, so fast motion cannot skip it.
+export function crossedGoal(from, to, radius, cell, fi) {
+  if (!goalEdge(cell)) return false;
+  const q=cellCenter(cell.x,cell.z), [dx,dz]=direction(cell);
+  const a=(from.x-q.x)*dx+(from.z-q.z)*dz;
+  const b=(to.x-q.x)*dx+(to.z-q.z)*dz;
+  if (a >= .5 || b < .5 || b <= a) return false;
+  const t=(.5-a)/(b-a);
+  const crossing={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t,z:from.z+(to.z-from.z)*t};
+  // Avoid a floating-point comparison against the plane after interpolation.
+  const across=(crossing.x-q.x)*(-dz)+(crossing.z-q.z)*dx;
+  return Math.abs(across) <= .5-radius+.015
+    && crossing.y > -fi*GAP-.15 && crossing.y < -fi*GAP+.9;
 }
 export function footprint(c) {
   const [dx, dz] = direction(c);

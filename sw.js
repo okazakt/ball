@@ -1,4 +1,4 @@
-const CACHE = 'toukan-2.4.1+6caa1d71ae62';
+const CACHE = 'toukan-2.5.0+0ab7e75f483f';
 const ASSETS = [
   './',
   './index.html',
@@ -20,6 +20,7 @@ const ASSETS = [
   './src/case-visuals.js',
   './src/stage.js',
   './src/quests.js',
+  './src/quest-layouts.js',
   './src/mechanics.js',
   './src/editor.js',
   './src/storage.js',

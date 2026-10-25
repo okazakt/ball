@@ -39,7 +39,7 @@ test('retracted door cap stays inside the floor channel, with safe telescoping s
  assert.ok(pose.postHeight>0);
 });
 
-test('side exits require the whole ball to leave through the correct opening and layer', async () => {
+test('side exits detect the center crossing the correct opening and layer', async () => {
   const {insideGoal,cellCenter} = await import('../src/mechanics.js');
   for (const cell of [{x:7,z:5,rotation:1},{x:0,z:5,rotation:3},{x:3,z:0,rotation:2},{x:3,z:10,rotation:0}]) {
     const q=cellCenter(cell.x,cell.z), dirs=[[0,1],[1,0],[0,-1],[-1,0]], [dx,dz]=dirs[cell.rotation];
@@ -51,4 +51,21 @@ test('side exits require the whole ball to leave through the correct opening and
       assert.ok(!insideGoal({...p,x:p.x-dz*.4,z:p.z+dx*.4},.2,cell,fi));
     }
   }
+});
+
+
+test('swept exit detection catches M balls near either jamb and fast crossings', async()=>{
+ const {crossedGoal,insideGoal,cellCenter,direction}=await import('../src/mechanics.js');
+ for(const cell of [{x:7,z:10,rotation:1},{x:0,z:5,rotation:3},{x:3,z:0,rotation:2},{x:3,z:10,rotation:0}])
+ for(const fi of [0,1]) for(const radius of [.35,.4]) for(const offset of [-.08,0,.08]) {
+  const q=cellCenter(cell.x,cell.z),[dx,dz]=direction(cell);
+  const at=(along,y=-fi*GAP+radius)=>({x:q.x+dx*along-dz*offset,z:q.z+dz*along+dx*offset,y});
+  assert.ok(crossedGoal(at(.45),at(1.2),radius,cell,fi),'cannot skip goal before out-of-bounds');
+  assert.ok(insideGoal(at(.51),radius,cell,fi),'ball need not fall off the threshold before winning');
+  assert.ok(!crossedGoal(at(1.2),at(.45),radius,cell,fi),'inward motion is not a goal');
+  assert.ok(!crossedGoal(at(.1),at(.49),radius,cell,fi),'must cross the actual exit');
+  assert.ok(!crossedGoal(at(.45,-fi*GAP-1),at(1.2,-fi*GAP-1),radius,cell,fi),'falling past another floor is not a goal');
+  const bad=at(.45),badEnd=at(1.2);bad.x-=dz*.4;bad.z+=dx*.4;badEnd.x-=dz*.4;badEnd.z+=dx*.4;
+  assert.ok(!crossedGoal(bad,badEnd,radius,cell,fi),'other perimeter edges remain out of bounds');
+ }
 });
