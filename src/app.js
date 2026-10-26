@@ -36,6 +36,7 @@ const game = new Game($('#viewport'), sound, {
     $('#qr').hidden = true;
     $('#status').textContent = game.quest ? QUESTS[questIndex].hint : '開始ボタンでスタート';
     $('#start-panel').hidden = false;
+    updateViewControls();
   },
   frame(g) {
     if (g.state === 'playing')
@@ -45,13 +46,13 @@ const game = new Game($('#viewport'), sound, {
         ? '見つかった！ 追跡から逃げよう'
         : g.noise > 0.6
         ? '大きな音！ 敵が調べに来ます'
-        : g.balls.some(b => !b.done && b.floor === 1) ? '下段の玉を、坂道へ。視点は上段に固定。' : '静かに、光の先へ。';
+        : g.balls.some(b => !b.done && b.floor === 1) ? (g.cameraMode==='tilt'?'下段の玉を、坂道へ。盤の傾きを3D表示中。':'下段の玉を、坂道へ。視点は上段に固定。') : '静かに、光の先へ。';
     $('#timer').textContent = g.elapsed.toFixed(2).padStart(6, '0');
     $('#balls-status').textContent = g.balls.map((b) => (b.done ? '○' : '●')).join(' ');
     $('#noise').textContent =
       'NOISE ' + Array.from({ length: 5 }, (_, i) => (i < g.noise * 5 ? '▰' : '░')).join('');
-    $('#floor-label').innerHTML = '上段 <span>FIXED VIEW</span>';
-    $('#floor-status').textContent = g.balls.some(b => !b.done && b.floor === 1) ? '下段の玉を操作中 · 視点は上段' : '上段・下段';
+    updateViewControls();
+    $('#floor-status').textContent = g.cameraMode==='tilt'?'上段・下段 · 3D表示':g.balls.some(b => !b.done && b.floor === 1) ? '下段の玉を操作中 · 視点は上段' : '上段・下段';
     $('#tilt-indicator i').style.transform = `translate(${g.tilt.z * 30}px,${g.tilt.x * 30}px)`;
   },
   status(t) {
@@ -68,17 +69,33 @@ const game = new Game($('#viewport'), sound, {
     $('#start-panel').hidden = true;
     closeDialogs();
     $('#replay-label').hidden = false;
-    $('#status').textContent = 'リプレイ再生中 · 下段の玉の位置は波紋で表示';
+    $('#status').textContent = 'リプレイ再生中 · ビューを切り替えて確認できます';
   },
   replayEnd(r) {
     $('#replay-label').hidden = true;
     showResult(r);
+  },
+  viewChanged() {
+    updateViewControls();
+    $('#video').disabled=!game.canExportVideo()||game.logCount<2||!!game.exportingVideo;
+    $('#video').textContent=game.canExportVideo()?'リプレイから動画を作る':'このブラウザは動画出力非対応';
   },
   video(blob) {
     $('#video').disabled = !blob;
     $('#video').textContent = blob ? '動画を保存 / 共有' : 'このブラウザは録画非対応';
   },
 });
+function updateViewControls() {
+  const selector=$('#view-mode');
+  if(selector.value!==game.cameraMode)selector.value=game.cameraMode;
+  selector.disabled=!!game.exportingVideo;
+  $('#floor-label').innerHTML=game.cameraMode==='tilt'
+    ? '盤の傾き3D <span>CAMERA FIXED</span>' : '上段 <span>FIXED VIEW</span>';
+}
+$('#view-mode').onchange=e=>{
+  if(!game.setCameraMode(e.target.value))toast('動画出力が終わってからビューを切り替えてください');
+  updateViewControls();
+};
 function showResult(r) {
   $('#next-quest').hidden = !r.won || !game.quest || questIndex >= QUESTS.length-1;
   $('#result-tag').textContent = r.won ? 'MISSION COMPLETE' : 'SIGNAL LOST';

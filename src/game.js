@@ -1,3 +1,4 @@
+import { tiltedBoardCamera } from './camera-view.js';
 import { STRONG_SHAKE_ACCELERATION, STRONG_SHAKE_TILT_RATE, STRONG_SHAKE_DURATION, ROBOT_STUN_RELEASE, robotShakeCharge, rightWallOrder, visionObstacles, sightDistance, visionPolygon } from './robot-behavior.js';
 import { FLOOR_WINDOW_OPACITY, FLOOR_WINDOW_SIDE_OPACITY, windowDaylight } from './translucent-floor.js';
 import { laminateFloorGeometry } from './floor-laminate.js';
@@ -34,6 +35,7 @@ export class Game {
     this.ready = false;
     this.gyro = false;
     this.quest = true;
+    this.cameraMode = 'fixed';
     this.wallSettings = { ...FIXED_WALL_SETTINGS };
     this.frameSettings = { ...FRAME_DEFAULTS };
     this.wallMaterials = new Set();
@@ -159,10 +161,30 @@ export class Game {
     // Fit the lid without stretching either axis, including short/wide screens.
     this.viewHeight = Math.max(CASE_DEPTH, CASE_WIDTH / this.camera.aspect);
     this.viewWidth = this.viewHeight * this.camera.aspect;
-    this.distance = this.viewHeight / (2 * Math.tan(T.MathUtils.degToRad(this.camera.fov / 2)));
+    this.distance = this.viewHeight / (2 * Math.tan(T.MathUtils.degToRad(18 / 2)));
+    this.tiltCamera = tiltedBoardCamera(this.camera.aspect);
     this.updateCamera();
   }
+  setCameraMode(mode) {
+    if(!['fixed','tilt'].includes(mode))throw Error('ビューが正しくありません');
+    if(this.exportingVideo)return false;
+    if(mode===this.cameraMode)return true;
+    this.cameraMode=mode;
+    // An existing exported video belongs to the previous view.
+    this.recordedBlob=null;
+    if(this.renderer){this.updateCamera();this.renderScene();}
+    this.events.viewChanged?.(mode);return true;
+  }
   updateCamera() {
+    if(this.cameraMode==='tilt') {
+      const pose=this.tiltCamera??tiltedBoardCamera(this.camera.aspect);
+      this.camera.fov=pose.fov;this.camera.near=pose.near;this.camera.far=pose.far;
+      this.camera.up.set(0,1,0);
+      this.camera.position.set(pose.position.x,pose.position.y,pose.position.z);
+      this.camera.lookAt(pose.target.x,pose.target.y,pose.target.z);
+      this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld(true);return;
+    }
+    this.camera.fov=18;this.camera.near=.1;this.camera.far=100;
     const lidY = LID_Y;
     // Limit visual obliqueness independently of the physical control range.
     const eyeX = -Math.tan(this.tilt.z * .3) * this.distance;
@@ -299,7 +321,7 @@ export class Game {
     this.outcome = null;
     this.recordedBlob = null;
     this.viewFloor = 0;
-    this.board.rotation.set(0, 0, 0);
+    this.board.rotation.set(0,0,0);
     this.updateCamera();
     this.wallMaterials.clear();
     this.wallColliders = [];
@@ -1442,9 +1464,10 @@ export class Game {
         this.sun.layers.enable(i + 1);
       }
     this.lowerAmbient.visible = !this.stage.floors[1].dark;
-    this.sun.position.set(4 + this.tilt.z * 12, 12 - fi * GAP, 3 + this.tilt.x * 10);
+    const fixed=this.cameraMode!=='tilt';
+    this.sun.position.set(4 + (fixed?this.tilt.z*12:0),12-fi*GAP,3+(fixed?this.tilt.x*10:0));
     this.sunTarget.position.set(0, -fi * GAP, 0);
-    this.board.rotation.set(0, 0, 0);
+    this.board.rotation.set(fixed?0:this.tilt.x,0,fixed?0:-this.tilt.z);
     this.updateCamera();
     this.board.updateMatrixWorld(true);
     for(const light of this.movingLights){

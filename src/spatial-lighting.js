@@ -1,6 +1,6 @@
 // Keep PBR shading, but give moving objects a continuous lighting field instead
 // of selecting a completely different room's lights at a floor index boundary.
-const T=window.THREE, COUNT=8, tint=new T.Color();
+const T=window.THREE, COUNT=8, tint=new T.Color(),objectWorldPosition=new T.Vector3();
 export function exposureAt(y, radius=.4) {
   const t=Math.max(0,Math.min(1,(y+.24+radius)/(.39+2*radius)));
   return t*t*(3-2*t);
@@ -62,8 +62,9 @@ export function updateSpatialMaterial(game,mesh,exposure,envStrength=.22) {
   u.movingGround.value.copy(game.ambient.groundColor).multiplyScalar(game.ambient.intensity*upper)
     .add(tint.copy(game.lowerAmbient.groundColor).multiplyScalar(game.lowerAmbient.intensity*lower));
   mesh.material.envMapIntensity=.015+(envStrength-.015)*upper;
+  mesh.getWorldPosition(objectWorldPosition);
   const lights=game.movingLights.filter(light=>light.visible && (light.userData.baseIntensity??light.intensity)>0)
-    .sort((a,b)=>a.userData.spatialPosition.distanceToSquared(mesh.position)-b.userData.spatialPosition.distanceToSquared(mesh.position));
+    .sort((a,b)=>a.userData.spatialPosition.distanceToSquared(objectWorldPosition)-b.userData.spatialPosition.distanceToSquared(objectWorldPosition));
   for(let i=0;i<COUNT;i++){
     const light=lights[i];if(!light){u.movingColors.value[i].setRGB(0,0,0);u.movingParams.value[i].set(0,2,-1,1);continue;}
     u.movingPositions.value[i].copy(light.userData.spatialPosition).applyMatrix4(game.camera.matrixWorldInverse);

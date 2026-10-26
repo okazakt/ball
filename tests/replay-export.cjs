@@ -6,6 +6,7 @@ const assert=require('node:assert/strict');
  const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{requestAnimationFrame=()=>0});
  await page.goto('http://127.0.0.1:8000');await page.waitForFunction(()=>window.__toukan?.game.balls?.length,{}, {timeout:120000,polling:100});
+ await page.evaluate(mode=>{window.exportViewMode=mode},process.env.VIEW_MODE||'fixed');
  const checks=await page.evaluate(async()=>{
   const g=window.__toukan.game,T=window.THREE,{defaultStage}=await import('./src/stage.js');
   const check=(ok,msg)=>{if(!ok)throw Error(msg)};
@@ -24,6 +25,7 @@ const assert=require('node:assert/strict');
   check(captureCalls===0&&!g.recordedBlob,'Finishing generated an unsolicited video');
   g.playReplay(true);check(captureCalls===0,'Ordinary replay started recording');
   g.updateReplay(10);g.updateReplay(2);
+  if(window.exportViewMode==='tilt')g.setCameraMode('tilt');
   check(g.exportReplayVideo()&&captureCalls===1&&g.exportingVideo,'Explicit export failed to start');
   return {normalRecording:false,lowerRipple:true};
  });
@@ -36,7 +38,7 @@ const assert=require('node:assert/strict');
  await page.waitForFunction(()=>!!window.__toukan.game.recordedBlob,{}, {timeout:10000});
  const result=await page.evaluate(()=>{
   const g=window.__toukan.game;
-  return {bytes:g.recordedBlob.size,type:g.recordedBlob.type,tracksEnded:exportStreams[0].getTracks().every(t=>t.readyState==='ended'),state:g.state,button:document.querySelector('#video').textContent};
+  return {bytes:g.recordedBlob.size,type:g.recordedBlob.type,tracksEnded:exportStreams[0].getTracks().every(t=>t.readyState==='ended'),state:g.state,view:g.cameraMode,button:document.querySelector('#video').textContent};
  });
  assert.ok(result.bytes>0);assert.ok(result.tracksEnded);assert.equal(result.state,'finished');assert.match(result.button,/共有/);
  assert.deepEqual(errors,[]);console.log(JSON.stringify({...checks,...result}));
