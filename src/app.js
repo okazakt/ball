@@ -51,7 +51,7 @@ const game = new Game($('#viewport'), sound, {
     $('#balls-status').textContent = g.balls.map((b) => (b.done ? '○' : '●')).join(' ');
     $('#noise').textContent =
       'NOISE ' + Array.from({ length: 5 }, (_, i) => (i < g.noise * 5 ? '▰' : '░')).join('');
-    updateViewControls();
+    updateViewControls(false);
     $('#floor-status').textContent = g.cameraMode==='tilt'?'上段・下段 · 3D表示':g.balls.some(b => !b.done && b.floor === 1) ? '下段の玉を操作中 · 視点は上段' : '上段・下段';
     $('#tilt-indicator i').style.transform = `translate(${g.tilt.z * 30}px,${g.tilt.x * 30}px)`;
   },
@@ -85,9 +85,11 @@ const game = new Game($('#viewport'), sound, {
     $('#video').textContent = blob ? '動画を保存 / 共有' : 'このブラウザは録画非対応';
   },
 });
-function updateViewControls() {
+function updateViewControls(syncSelection = true) {
   const selector=$('#view-mode');
-  if(selector.value!==game.cameraMode)selector.value=game.cameraMode;
+  // Native mobile pickers can change the pending value before firing change.
+  // Only synchronize selection on load/change, never on animation frames.
+  if(syncSelection && selector.value!==game.cameraMode)selector.value=game.cameraMode;
   selector.disabled=!!game.exportingVideo;
   $('#floor-label').innerHTML=game.cameraMode==='tilt'
     ? '盤の傾き3D <span>CAMERA FIXED</span>' : '上段 <span>FIXED VIEW</span>';

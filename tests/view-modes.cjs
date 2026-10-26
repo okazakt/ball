@@ -56,6 +56,16 @@ const assert=require('node:assert/strict');
    g.finish(true,'view regression');document.querySelectorAll('dialog[open]').forEach(d=>d.close());
    g.playReplay(true);const replayCamera=pose();
    for(let i=0;i<20;i++){g.updateReplay(1/30);g.renderScene();check(unchanged(replayCamera,pose()),'3D replay camera moved');}
+   // Exercise the UI while a native picker has a pending, uncommitted choice.
+   // The per-frame HUD update must not reset it before the change event.
+   g.setCameraMode('fixed');
+   const selector=document.querySelector('#view-mode');
+   selector.value='tilt';
+   for(let i=0;i<5;i++){g.events.frame(g);g.updateReplay(1/60);}
+   check(selector.value==='tilt'&&g.cameraMode==='fixed','Frame reset the pending replay view selection');
+   const selectionCursor=g.replayIndex;
+   selector.dispatchEvent(new Event('change',{bubbles:true}));
+   check(g.cameraMode==='tilt'&&g.replayIndex===selectionCursor,'Replay view selection failed or reset playback');
    const cursor=g.replayIndex,position=g.balls[0].mesh.position.clone();g.setCameraMode('fixed');
    check(g.replayIndex===cursor&&g.balls[0].mesh.position.equals(position),'View switch reset replay');
    g.exportingVideo=true;check(!g.setCameraMode('tilt')&&g.cameraMode==='fixed','Export view was changed during recording');g.exportingVideo=false;
