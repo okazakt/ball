@@ -1,4 +1,3 @@
-import { MotionInertia } from './motion-inertia.js';
 import { tiltedBoardCamera } from './camera-view.js';
 import { STRONG_SHAKE_ACCELERATION, STRONG_SHAKE_TILT_RATE, STRONG_SHAKE_DURATION, ROBOT_STUN_RELEASE, robotShakeCharge, rightWallOrder, visionObstacles, sightDistance, visionPolygon } from './robot-behavior.js';
 import { FLOOR_WINDOW_OPACITY, FLOOR_WINDOW_SIDE_OPACITY, windowDaylight } from './translucent-floor.js';
@@ -35,7 +34,6 @@ export class Game {
     this.activeFloor = 0;
     this.ready = false;
     this.gyro = false;
-    this.motionInertia = new MotionInertia();
     this.quest = true;
     this.cameraMode = 'fixed';
     this.wallSettings = { ...FIXED_WALL_SETTINGS };
@@ -302,7 +300,6 @@ export class Game {
     this.noise = 0;
     this.target = { x: 0, z: 0 };
     this.tilt = { x: 0, z: 0 };
-    this.motionInertia.reset();
     this.jumpAt = -10;
     this.strongShakeUntil = -1;
     this.robotShakeCharge = 0;
@@ -1076,14 +1073,12 @@ export class Game {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key));
     window.addEventListener('blur', () => {
-      this.motionInertia.reset();
       this.keys.clear();
       this.pointers.clear();
       this.target = { x: 0, z: 0 };
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        this.motionInertia.reset();
         this.keys.clear();
         this.target = { x: 0, z: 0 };
         this.acc = 0;
@@ -1103,7 +1098,6 @@ export class Game {
       await DeviceMotionEvent.requestPermission();
     this.gyro = true;
     this.gyroBase = null;
-    this.motionInertia.reset();
     this.orientationHandler ??= (e) => {
       if (!this.gyro || e.beta === null || e.gamma === null) return;
       this.gyroBase ??= { b: e.beta, g: e.gamma };
@@ -1112,12 +1106,7 @@ export class Game {
     };
     window.addEventListener('deviceorientation', this.orientationHandler);
     this.motionHandler ??= (e) => {
-      if (!this.gyro || this.state !== 'playing' || document.hidden || !document.hasFocus()) {
-        this.motionInertia.reset();
-        return;
-      }
       const a = e.acceleration;
-      this.motionInertia.sample(a, window.screen?.orientation?.angle ?? window.orientation ?? 0, performance.now());
       const acceleration=a ? Math.hypot(a.x || 0,a.y || 0,a.z || 0) : 0;
       if(acceleration>=STRONG_SHAKE_ACCELERATION)this.registerStrongShake(.16);
       if(acceleration>16)this.jump('motion');
@@ -1335,11 +1324,10 @@ export class Game {
     this.updateRobotShake(dt,tiltRate);
     if(tiltRate>1.6)
       for(const e of this.enemies)if(e.c.type!=='robot')e.stun=1.4;
-    const inertia = this.gyro ? this.motionInertia.read(performance.now()) : { x: 0, z: 0 };
     this.world.gravity = {
-      x: Math.sin(this.tilt.z) * TILT_GRAVITY + inertia.x,
+      x: Math.sin(this.tilt.z) * TILT_GRAVITY,
       y: -Math.cos(this.tilt.x) * Math.cos(this.tilt.z) * GRAVITY,
-      z: Math.sin(this.tilt.x) * TILT_GRAVITY + inertia.z,
+      z: Math.sin(this.tilt.x) * TILT_GRAVITY,
     };
     for (const d of this.doors) {
       const switched = this.stage.floors[d.fi].cells.some(
@@ -1360,7 +1348,7 @@ export class Game {
       d.nextSlide = d.slide + clamp(target-d.slide,-dt*1.8,dt*1.8);
       if(!this.releaseDoorBall(d,d.nextSlide))d.nextSlide=d.slide;
     }
-    if (Math.hypot(this.tilt.x, this.tilt.z) > 0.001 || Math.hypot(inertia.x, inertia.z) > 0)
+    if (Math.hypot(this.tilt.x, this.tilt.z) > 0.001)
       for (const b of this.balls) if (!b.done) b.body.wakeUp();
     // Small toy clearances need substeps as well as CCD at high impact speeds.
     this.world.timestep = dt / 4;
