@@ -413,12 +413,15 @@ export class Game {
       }
       if (fi === 0) {
       const coverMat = new T.MeshPhysicalMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.012,
-        roughness: 0.08, metalness: 0, clearcoat: 1, envMapIntensity: 0.25,
+        color: 0xffffff, transparent: true, opacity: 0.025,
+        roughness: 0.045, metalness: 0, ior: 1.49,
+        clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 0.35,
         depthWrite: false,
       });
       const cover = this.box(0, y + 1.035, 0, CASE_WIDTH, 0.07, CASE_DEPTH, coverMat, fi, false);
       cover.castShadow = cover.receiveShadow = false;
+      // Composite the clear sheet after the transparent walls beneath it.
+      cover.renderOrder = 99;
       cover.userData.surface = 'lid';
       // Each ball collides with its own floor's lid, but can pass the next lid
       // while falling. Group 1 is shared by balls and all ordinary obstacles.

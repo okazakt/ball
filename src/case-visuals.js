@@ -511,17 +511,18 @@ export function spaceTexture() {
 
 export function lidReflectionMaterial() {
   return new T.ShaderMaterial({
-    transparent: true, depthWrite: false, depthTest: false,
+    transparent: true, depthWrite: false, depthTest: true,
     uniforms: { tilt: { value: new T.Vector2() } },
     vertexShader: `varying vec2 vUv;
       void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `varying vec2 vUv; uniform vec2 tilt;
       void main() {
         vec2 p = vUv - vec2(0.5) - tilt * 0.55;
-        float band = exp(-pow((p.x + p.y * 0.32 - 0.30) / 0.075, 2.0));
-        float second = exp(-pow((p.x + p.y * 0.32 + 0.40) / 0.025, 2.0));
-        float edge = smoothstep(0.0, 0.14, vUv.y) * smoothstep(0.0, 0.14, 1.0-vUv.y);
-        gl_FragColor = vec4(0.84, 0.93, 1.0, (band * 0.065 + second * 0.025) * edge);
+        float band = exp(-pow((p.x + p.y * 0.32 - 0.30) / 0.12, 2.0));
+        float second = exp(-pow((p.x + p.y * 0.32 + 0.40) / 0.035, 2.0));
+        float edge = smoothstep(0.0, 0.035, vUv.x) * smoothstep(0.0, 0.035, 1.0-vUv.x)
+          * smoothstep(0.0, 0.08, vUv.y) * smoothstep(0.0, 0.08, 1.0-vUv.y);
+        gl_FragColor = vec4(0.88, 0.95, 1.0, (band * 0.085 + second * 0.025) * edge);
       }`,
   });
 }
